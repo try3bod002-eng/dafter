@@ -56,6 +56,8 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
     }
   }, []);
 
+  const [showHelpModal, setShowHelpModal] = useState(false);
+
   // Explicitly prompt the native browser microphone dialog
   const requestMicPermission = async (): Promise<boolean> => {
     if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
@@ -65,14 +67,14 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
         stream.getTracks().forEach((track) => track.stop());
         setMicStatus('granted');
         setErrorMessage(null);
+        setShowHelpModal(false);
         return true;
       } catch (err: any) {
         console.warn('Microphone permission request error:', err);
         setMicStatus('denied');
+        setShowHelpModal(true);
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          setErrorMessage(
-            'تم رفض إذن المايكروفون. يرجى الضغط على علامة القفل 🔒 أعلى المتصفح، ثم السماح بالمايكروفون وإعادة المحاولة.'
-          );
+          setErrorMessage('تم حظر المايكروفون في المتصفح. اتبع الخطوات بالأسفل لتفعيله.');
         } else {
           setErrorMessage('تعذر الوصول إلى المايكروفون. تأكد من تفعيله في إعدادات الهاتف.');
         }
@@ -230,30 +232,89 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
         </div>
       )}
 
-      {/* Permission / Error Dialog */}
-      {errorMessage && (
-        <div className="fixed top-16 inset-x-4 max-w-md mx-auto z-50 bg-[#1e1215] border-2 border-[#ef4444] text-[#fca5a5] p-4 rounded-2xl shadow-2xl animate-in fade-in zoom-in-95">
-          <div className="flex items-start gap-2.5">
-            <span className="text-2xl">🎙️❌</span>
-            <div className="flex-1">
-              <div className="font-black text-white text-sm mb-1">تنبيه المايكروفون:</div>
-              <p className="text-xs leading-relaxed mb-3">{errorMessage}</p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={requestMicPermission}
-                  className="bg-[#ef4444] hover:bg-[#dc2626] text-white text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-all"
-                >
-                  طلب إذن المايكروفون الآن 🎙️
-                </button>
-                <button
-                  onClick={() => setErrorMessage(null)}
-                  className="bg-[#2a171b] text-[#cbd5e1] hover:text-white text-xs font-bold px-2.5 py-1.5 rounded-lg cursor-pointer"
-                >
-                  إغلاق
-                </button>
+      {/* Permission / Help Modal */}
+      {showHelpModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-[#0f172a] border-2 border-[#38bdf8] rounded-2xl max-w-lg w-full p-5 shadow-2xl text-white max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-[#1e293b] pb-3 mb-4">
+              <div className="flex items-center gap-2 text-[#38bdf8] font-black text-base">
+                <span className="text-xl">🎙️</span>
+                <span>كيفية تفعيل المايك في متصفح هاتفك</span>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowHelpModal(false)}
+                className="text-[#94a3b8] hover:text-white font-black text-lg p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-[#94a3b8] mb-4 leading-relaxed">
+              إذا لم تظهر علامة القفل القديمة، فذلك لأن متصفح Chrome الحديث استبدلها بأيقونة إعدادات جديدة. اتبع إحدى الطرق البسيطة التالية:
+            </p>
+
+            {/* Android Chrome Section */}
+            <div className="bg-[#1e293b]/70 border border-[#334155] rounded-xl p-3.5 mb-3 text-xs leading-relaxed">
+              <div className="font-black text-[#38bdf8] text-sm mb-2 flex items-center gap-1.5">
+                <span>📱</span>
+                <span>لهواتف أندرويد (Google Chrome):</span>
+              </div>
+              <ol className="list-decimal list-inside space-y-2 text-[#e2e8f0]">
+                <li>
+                  <strong>أيقونة التحكم (🎛️ أو ⚙️):</strong> انظر لشريط الرابط بالأعلى بجانب اسم الموقع، اضغط على أيقونة الإعدادات/الشرطتين، ثم اختر <strong>&quot;الأذونات&quot;</strong> وفعّل <strong>الميكروفون (سماح)</strong>.
+                </li>
+                <li>
+                  <strong>أو من قائمة المتصفح:</strong> اضغط على الثلاث نقاط (⫶) أعلى الشاشة ⬅️ <strong>الإعدادات</strong> ⬅️ <strong>إعدادات المواقع الإلكترونية</strong> ⬅️ <strong>الميكروفون</strong> ⬅️ فعّل السماح للموقع.
+                </li>
+              </ol>
+            </div>
+
+            {/* iPhone Safari Section */}
+            <div className="bg-[#1e293b]/70 border border-[#334155] rounded-xl p-3.5 mb-4 text-xs leading-relaxed">
+              <div className="font-black text-[#a78bfa] text-sm mb-2 flex items-center gap-1.5">
+                <span>🍏</span>
+                <span>لهواتف آيفون (Safari):</span>
+              </div>
+              <p className="text-[#e2e8f0]">
+                اضغط على زر <strong>&quot;aA&quot;</strong> أو <strong>&quot;ع‌ع&quot;</strong> بجانب الرابط ⬅️ اختر <strong>إعدادات موقع الويب (Website Settings)</strong> ⬅️ الميكروفون ⬅️ اختر <strong>سماح (Allow)</strong>.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 border-t border-[#1e293b]">
+              <button
+                type="button"
+                onClick={requestMicPermission}
+                className="w-full sm:flex-1 bg-gradient-to-r from-[#0284c7] to-[#38bdf8] text-[#090d16] font-black py-2.5 px-4 rounded-xl text-xs hover:brightness-110 cursor-pointer shadow-lg"
+              >
+                🔄 إعادة فحص وتفعيل المايك الآن
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowHelpModal(false)}
+                className="w-full sm:w-auto bg-[#334155] text-white font-bold py-2.5 px-5 rounded-xl text-xs hover:bg-[#475569] cursor-pointer"
+              >
+                فهمت، إغلاق
+              </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Quick Error Banner if modal closed */}
+      {errorMessage && !showHelpModal && (
+        <div className="fixed top-16 inset-x-4 max-w-md mx-auto z-40 bg-[#1e1215] border-2 border-[#ef4444] text-[#fca5a5] p-3.5 rounded-2xl shadow-2xl flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-bold">
+            <span>🎙️❌</span>
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowHelpModal(true)}
+            className="bg-[#ef4444] text-white text-[11px] font-black px-2.5 py-1 rounded-lg cursor-pointer hover:bg-[#dc2626]"
+          >
+            كيف أفعّله؟
+          </button>
         </div>
       )}
 
