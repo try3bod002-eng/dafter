@@ -391,8 +391,8 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
           </div>
         )}
 
-        {/* Extra bottom spacer so the last card is never covered by the bottom bar */}
-        <div className="h-28 w-full pointer-events-none" aria-hidden="true" />
+        {/* Extra bottom spacer so the last card is never covered by the elevated floating button */}
+        <div className="h-36 w-full pointer-events-none" aria-hidden="true" />
       </main>
 
       {/* Persistent Voice Input Bar at Bottom */}

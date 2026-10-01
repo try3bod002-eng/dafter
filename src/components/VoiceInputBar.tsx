@@ -18,52 +18,7 @@ const EXAMPLES = [
   'الاسم أحمد رجب المبلغ خمسمية الملاحظات خالص',
 ];
 
-// ─────────────────────────────────────────────────────────────
-// SVG Radial Fan Math
-// Convention: 0° = top (12 o'clock), clockwise
-// ─────────────────────────────────────────────────────────────
-function toCartesian(cx: number, cy: number, r: number, angleDeg: number) {
-  const rad = (angleDeg - 90) * (Math.PI / 180);
-  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-}
 
-function fanBlade(
-  cx: number, cy: number,
-  ir: number, or_: number,
-  a1: number, a2: number
-): string {
-  const span = a2 >= a1 ? a2 - a1 : a2 + 360 - a1;
-  const large = span > 180 ? 1 : 0;
-  const o1 = toCartesian(cx, cy, or_, a1);
-  const o2 = toCartesian(cx, cy, or_, a2);
-  const i2 = toCartesian(cx, cy, ir, a2);
-  const i1 = toCartesian(cx, cy, ir, a1);
-  return `M${o1.x.toFixed(2)} ${o1.y.toFixed(2)} A${or_} ${or_} 0 ${large} 1 ${o2.x.toFixed(2)} ${o2.y.toFixed(2)} L${i2.x.toFixed(2)} ${i2.y.toFixed(2)} A${ir} ${ir} 0 ${large} 0 ${i1.x.toFixed(2)} ${i1.y.toFixed(2)}Z`;
-}
-
-function midArc(cx: number, cy: number, r: number, a1: number, a2: number) {
-  const mid = a2 >= a1 ? (a1 + a2) / 2 : (a1 + a2 + 360) / 2;
-  return toCartesian(cx, cy, r, mid);
-}
-
-// ─────────────────────────────────────────────────────────────
-// Layout constants
-// ─────────────────────────────────────────────────────────────
-const SVG_W = 240, SVG_H = 220;
-const CX = 120, CY = 182; // button center in SVG space
-const IR = 40;  // inner radius (just outside the button)
-const OR = 112; // outer radius (fan blade extent)
-const LR = 82;  // label radius (between IR and OR, offset toward outer)
-
-// Search blade: lower-left → upper-left arc (225° → 345°)
-const SA1 = 225, SA2 = 345;
-const SEARCH_PATH = fanBlade(CX, CY, IR, OR, SA1, SA2);
-const SEARCH_LABEL = midArc(CX, CY, LR, SA1, SA2); // mid at ~285° = NW
-
-// Record blade: upper-right arc (345° → 105°, wraps through 0°)
-const RA1 = 345, RA2 = 105;
-const RECORD_PATH = fanBlade(CX, CY, IR, OR, RA1, RA2);
-const RECORD_LABEL = midArc(CX, CY, LR, RA1, RA2); // mid at ~45° = NE
 
 // ─────────────────────────────────────────────────────────────
 // Component
@@ -81,15 +36,24 @@ export default function VoiceInputBar({
   const [isInAppBrowser, setIsInAppBrowser]   = useState(false);
   const [showHelpModal, setShowHelpModal]      = useState(false);
 
-  // Fan menu
-  const [menuOpen, setMenuOpen]       = useState(false);
-  const [touchedZone, setTouchedZone] = useState<'search' | 'record' | null>(null);
+  // Liquid Gesture Menu State
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState<'record' | 'search' | 'cancel' | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const recognitionRef    = useRef<any>(null);
   const transcriptRef     = useRef('');
   const activeVoiceModeRef = useRef<'record' | 'search' | null>(null);
 
+  // Gesture tracking refs
+  const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const selectedTargetRef = useRef<'record' | 'search' | 'cancel' | null>(null);
+  const recordBtnRef = useRef<HTMLButtonElement | null>(null);
+  const searchBtnRef = useRef<HTMLButtonElement | null>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
+
   useEffect(() => { activeVoiceModeRef.current = activeVoiceMode; }, [activeVoiceMode]);
+  useEffect(() => { selectedTargetRef.current = selectedTarget; }, [selectedTarget]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -99,17 +63,18 @@ export default function VoiceInputBar({
     }
   }, []);
 
-  const haptic = (ms = 25) => {
+  const haptic = useCallback((ms = 25) => {
     try { navigator.vibrate?.(ms); } catch {}
-  };
+  }, []);
 
   // ── Voice Engine ──────────────────────────────────────────
   const startVoiceEngine = useCallback((mode: 'record' | 'search') => {
     if (activeVoiceModeRef.current) return;
     setErrorMessage(null);
     setMenuOpen(false);
-    setTouchedZone(null);
-    haptic(40);
+    setSelectedTarget(null);
+    setIsDragging(false);
+    haptic(45);
 
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
@@ -163,7 +128,7 @@ export default function VoiceInputBar({
       setErrorMessage('تعذر تشغيل الميكروفون. تأكد من الإذن.');
       setShowHelpModal(true);
     }
-  }, [onVoiceSearch]);
+  }, [haptic, onVoiceSearch]);
 
   const stopVoiceEngine = useCallback((commit = true) => {
     const mode = activeVoiceModeRef.current;
@@ -183,7 +148,150 @@ export default function VoiceInputBar({
     }
     transcriptRef.current = '';
     setLiveTranscript('');
-  }, [onNewEntry, onVoiceSearch]);
+  }, [haptic, onNewEntry, onVoiceSearch]);
+
+  // ── Target Resolution on Pointer Move ─────────────────────
+  const resolveTargetAtPoint = useCallback((clientX: number, clientY: number, originX: number, originY: number) => {
+    const dx = clientX - originX;
+    const dy = clientY - originY;
+    const dist = Math.hypot(dx, dy);
+
+    // 1. Check cancel button bounding box
+    if (cancelBtnRef.current) {
+      const cRect = cancelBtnRef.current.getBoundingClientRect();
+      const pad = 12;
+      if (
+        clientX >= cRect.left - pad &&
+        clientX <= cRect.right + pad &&
+        clientY >= cRect.top - pad &&
+        clientY <= cRect.bottom + pad
+      ) {
+        return 'cancel';
+      }
+    }
+
+    // 2. Direct bounding box checks
+    if (recordBtnRef.current) {
+      const r = recordBtnRef.current.getBoundingClientRect();
+      if (
+        clientX >= r.left - 8 &&
+        clientX <= r.right + 8 &&
+        clientY >= r.top - 16 &&
+        clientY <= r.bottom + 16
+      ) {
+        return 'record';
+      }
+    }
+
+    if (searchBtnRef.current) {
+      const s = searchBtnRef.current.getBoundingClientRect();
+      if (
+        clientX >= s.left - 8 &&
+        clientX <= s.right + 8 &&
+        clientY >= s.top - 16 &&
+        clientY <= s.bottom + 16
+      ) {
+        return 'search';
+      }
+    }
+
+    // 3. Directional gesture vector (Thumb slide)
+    // RIGHT button is Record (dx > 16)
+    // LEFT button is Search (dx < -16)
+    // CENTER upward pull is Cancel (dy < -45 while |dx| < 20)
+    if (dist > 16) {
+      if (dy < -45 && Math.abs(dx) < 20) {
+        return 'cancel';
+      }
+      if (dx > 16) {
+        return 'record'; // Slide RIGHT -> Select RIGHT button (تسجيل جديد)
+      }
+      if (dx < -16) {
+        return 'search'; // Slide LEFT -> Select LEFT button (بحث صوتي)
+      }
+    }
+
+    return null;
+  }, []);
+
+  // ── Pointer Handlers (Hold & Slide Gesture) ───────────────
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (activeVoiceMode) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
+    pointerStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      time: Date.now(),
+    };
+    setIsDragging(false);
+    setSelectedTarget(null);
+    setMenuOpen(true);
+    haptic(20);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!pointerStartRef.current || !menuOpen) return;
+
+    const dx = e.clientX - pointerStartRef.current.x;
+    const dy = e.clientY - pointerStartRef.current.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist > 12) {
+      setIsDragging(true);
+    }
+
+    const target = resolveTargetAtPoint(
+      e.clientX,
+      e.clientY,
+      pointerStartRef.current.x,
+      pointerStartRef.current.y
+    );
+
+    if (target !== selectedTargetRef.current) {
+      if (target) {
+        haptic(18); // haptic tick when snapping onto an option!
+      }
+      setSelectedTarget(target);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!pointerStartRef.current) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    const elapsed = Date.now() - pointerStartRef.current.time;
+    const target = selectedTargetRef.current;
+    const wasDragging = isDragging;
+
+    pointerStartRef.current = null;
+    setIsDragging(false);
+
+    // If user dragged to a target, execute it immediately on release!
+    if (wasDragging && target) {
+      if (target === 'record') {
+        startVoiceEngine('record');
+      } else if (target === 'search') {
+        startVoiceEngine('search');
+      } else if (target === 'cancel') {
+        setMenuOpen(false);
+        setSelectedTarget(null);
+        haptic(15);
+      }
+      return;
+    }
+
+    // If it was just a quick tap without drag (< 250ms), toggle or keep open for manual clicks
+    if (elapsed < 250 && !wasDragging) {
+      // Toggle
+      setMenuOpen(prev => !prev);
+      setSelectedTarget(null);
+    }
+  };
 
   // ── Render ────────────────────────────────────────────────
   return (
@@ -221,11 +329,11 @@ export default function VoiceInputBar({
             <div className="flex gap-2">
               <button
                 onClick={() => { setShowHelpModal(false); startVoiceEngine('record'); }}
-                className="flex-1 bg-sky-400 text-[#090d16] font-black py-2.5 rounded-xl text-xs"
+                className="flex-1 bg-sky-400 text-[#090d16] font-black py-2.5 rounded-xl text-xs cursor-pointer"
               >حاول مرة أخرى</button>
               <button
                 onClick={() => setShowHelpModal(false)}
-                className="flex-1 bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs"
+                className="flex-1 bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs cursor-pointer"
               >إغلاق</button>
             </div>
           </div>
@@ -234,12 +342,12 @@ export default function VoiceInputBar({
 
       {/* ── Active Listening Modal ── */}
       {activeVoiceMode && (
-        <div className="fixed inset-x-3 bottom-5 max-w-lg mx-auto z-50 animate-in slide-in-from-bottom-4 duration-200">
+        <div className="fixed inset-x-3 bottom-6 max-w-lg mx-auto z-50 animate-in slide-in-from-bottom-4 duration-200">
           <div
             className={`rounded-3xl p-4 backdrop-blur-2xl border-2 shadow-2xl ${
               activeVoiceMode === 'search'
-                ? 'bg-[#06111f]/97 border-sky-400 shadow-sky-500/20'
-                : 'bg-[#180808]/97 border-red-500 shadow-red-500/20'
+                ? 'bg-[#06111f]/97 border-sky-400 shadow-sky-500/25'
+                : 'bg-[#180808]/97 border-red-500 shadow-red-500/25'
             }`}
           >
             {/* Header */}
@@ -261,7 +369,7 @@ export default function VoiceInputBar({
               <div className="flex gap-1.5">
                 <button
                   onClick={() => stopVoiceEngine(true)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer ${activeVoiceMode === 'search' ? 'bg-gradient-to-r from-sky-600 to-sky-400 text-white' : 'bg-gradient-to-r from-red-700 to-red-500 text-white'}`}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer ${activeVoiceMode === 'search' ? 'bg-gradient-to-r from-sky-600 to-sky-400 text-white shadow-md' : 'bg-gradient-to-r from-red-700 to-red-500 text-white shadow-md'}`}
                 >
                   {activeVoiceMode === 'search' ? '✓ بحث' : '💾 حفظ'}
                 </button>
@@ -289,199 +397,146 @@ export default function VoiceInputBar({
         </div>
       )}
 
-      {/* ── BACKDROP ── */}
-      {menuOpen && (
+      {/* ── BACKDROP ON MENU OPEN ── */}
+      {menuOpen && !activeVoiceMode && (
         <div
-          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-[2px]"
-          onClick={() => setMenuOpen(false)}
+          className="fixed inset-0 z-30 bg-black/55 backdrop-blur-[3px] transition-opacity duration-200"
+          onClick={() => { setMenuOpen(false); setSelectedTarget(null); }}
         />
       )}
 
-      {/* ── RADIAL FAN HUB ── */}
+      {/* ── FLOATING VOICE CONTROLLER (ELEVATED & LARGER) ── */}
       {!activeVoiceMode && (
-        <div className="fixed inset-x-0 bottom-0 z-40 flex justify-center items-end pointer-events-none">
+        <div className="fixed inset-x-0 bottom-10 sm:bottom-12 z-40 flex flex-col items-center pointer-events-none select-none">
 
-          {/* Active search pill */}
+          {/* Active search pill indicator */}
           {searchQuery && (
-            <div className="absolute bottom-[200px] pointer-events-auto flex items-center gap-2 bg-sky-600/90 text-white text-xs font-black px-3.5 py-1.5 rounded-full shadow-lg border border-sky-400 backdrop-blur-md">
+            <div className="mb-3 pointer-events-auto flex items-center gap-2 bg-sky-600/95 text-white text-xs font-black px-4 py-1.5 rounded-full shadow-lg border border-sky-400/50 backdrop-blur-md animate-in fade-in zoom-in-95">
               <span>🔍 &quot;{searchQuery}&quot;</span>
-              <button onClick={onClearSearch} className="bg-black/20 hover:bg-black/40 rounded-full w-4 h-4 flex items-center justify-center text-[10px]">✕</button>
+              <button onClick={onClearSearch} className="bg-black/25 hover:bg-black/40 rounded-full w-4 h-4 flex items-center justify-center text-[10px] cursor-pointer">✕</button>
             </div>
           )}
 
-          <div className="pointer-events-auto relative" style={{ width: SVG_W, height: SVG_H }}>
+          {/* ───── POPUP CAPSULE / LIQUID SELECTION MENU ───── */}
+          <div
+            className={`pointer-events-auto flex flex-col items-center mb-3 transition-all duration-300 ease-out origin-bottom ${
+              menuOpen
+                ? 'opacity-100 scale-100 translate-y-0'
+                : 'opacity-0 scale-75 translate-y-6 pointer-events-none'
+            }`}
+          >
+            {/* Main Interactive Floating Capsule: Left is Search, Right is Record */}
+            <div dir="ltr" className="bg-[#0b1329]/95 backdrop-blur-2xl border-2 border-white/15 p-2 rounded-full shadow-[0_16px_50px_rgba(0,0,0,0.8)] flex items-center gap-2">
 
-            {/* ───── SVG FAN ───── */}
-            <svg
-              width={SVG_W}
-              height={SVG_H}
-              viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-              aria-hidden="true"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                overflow: 'visible',
-                transformOrigin: `${CX}px ${CY}px`,
-                transform: menuOpen ? 'scale(1)' : 'scale(0)',
-                transition: 'transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1)',
-              }}
-            >
-              {/* ── SEARCH BLADE (upper-left) ── */}
-              <path
-                d={SEARCH_PATH}
-                fill={touchedZone === 'search' ? '#0284c7' : '#0c2a45'}
-                stroke={touchedZone === 'search' ? '#38bdf8' : '#0e3d66'}
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-                style={{
-                  cursor: 'pointer',
-                  transition: 'fill 0.12s, filter 0.12s',
-                  filter: touchedZone === 'search'
-                    ? 'drop-shadow(0 0 14px rgba(56,189,248,0.6))'
-                    : 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))',
-                }}
-                onPointerDown={() => { haptic(15); setTouchedZone('search'); }}
-                onPointerUp={() => { startVoiceEngine('search'); }}
-                onPointerLeave={() => setTouchedZone(null)}
-              />
-
-              {/* Search icon + label */}
-              <g
-                transform={`translate(${SEARCH_LABEL.x.toFixed(1)} ${SEARCH_LABEL.y.toFixed(1)})`}
-                style={{ pointerEvents: 'none' }}
+              {/* 1. SEARCH BUTTON (LEFT) */}
+              <button
+                ref={searchBtnRef}
+                type="button"
+                onClick={() => startVoiceEngine('search')}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-full font-black text-xs transition-all duration-200 cursor-pointer ${
+                  selectedTarget === 'search'
+                    ? 'bg-gradient-to-r from-sky-600 via-sky-500 to-cyan-400 text-white shadow-[0_0_20px_rgba(56,189,248,0.7)] scale-110 ring-2 ring-sky-300'
+                    : 'bg-white/5 text-sky-300 hover:bg-white/10 active:scale-95'
+                }`}
               >
-                {/* Magnifier icon */}
-                <circle cx="0" cy="-12" r="8" fill="none" stroke={touchedZone === 'search' ? 'white' : '#7dd3fc'} strokeWidth="2.5" />
-                <line x1="6" y1="-6" x2="11" y2="-1" stroke={touchedZone === 'search' ? 'white' : '#7dd3fc'} strokeWidth="2.5" strokeLinecap="round" />
-                {/* Label */}
-                <text
-                  textAnchor="middle"
-                  y="5"
-                  fill={touchedZone === 'search' ? 'white' : '#93c5fd'}
-                  fontSize="10"
-                  fontWeight="800"
-                  fontFamily="Cairo, Arial, sans-serif"
-                >
-                  بحث صوتي
-                </text>
-              </g>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center ${selectedTarget === 'search' ? 'bg-white text-sky-600' : 'bg-sky-500/20 text-sky-300'}`}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                </div>
+                <span>بحث صوتي</span>
+              </button>
 
-              {/* ── RECORD BLADE (upper-right) ── */}
-              <path
-                d={RECORD_PATH}
-                fill={touchedZone === 'record' ? '#dc2626' : '#2d0808'}
-                stroke={touchedZone === 'record' ? '#f87171' : '#4a1010'}
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-                style={{
-                  cursor: 'pointer',
-                  transition: 'fill 0.12s, filter 0.12s',
-                  filter: touchedZone === 'record'
-                    ? 'drop-shadow(0 0 14px rgba(239,68,68,0.6))'
-                    : 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))',
-                }}
-                onPointerDown={() => { haptic(15); setTouchedZone('record'); }}
-                onPointerUp={() => { startVoiceEngine('record'); }}
-                onPointerLeave={() => setTouchedZone(null)}
-              />
-
-              {/* Mic icon + label */}
-              <g
-                transform={`translate(${RECORD_LABEL.x.toFixed(1)} ${RECORD_LABEL.y.toFixed(1)})`}
-                style={{ pointerEvents: 'none' }}
+              {/* 2. CANCEL BUTTON (CENTER) */}
+              <button
+                ref={cancelBtnRef}
+                type="button"
+                onClick={() => { setMenuOpen(false); setSelectedTarget(null); haptic(15); }}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer ${
+                  selectedTarget === 'cancel'
+                    ? 'bg-red-500 text-white scale-125 shadow-[0_0_15px_rgba(239,68,68,0.8)] ring-2 ring-white'
+                    : 'bg-white/10 text-gray-400 hover:text-white hover:bg-white/15 active:scale-90'
+                }`}
+                title="إلغاء"
               >
-                {/* Mic body */}
-                <rect x="-5" y="-21" width="10" height="14" rx="5" fill="none" stroke={touchedZone === 'record' ? 'white' : '#fca5a5'} strokeWidth="2.3" />
-                {/* Mic stand arc */}
-                <path d="M -9 -11 Q -9 0 0 0 Q 9 0 9 -11" fill="none" stroke={touchedZone === 'record' ? 'white' : '#fca5a5'} strokeWidth="2.3" strokeLinecap="round" />
-                {/* Mic stem */}
-                <line x1="0" y1="0" x2="0" y2="5" stroke={touchedZone === 'record' ? 'white' : '#fca5a5'} strokeWidth="2.3" strokeLinecap="round" />
-                {/* Red dot */}
-                <circle cx="7" cy="-18" r="3" fill="#ef4444" stroke={touchedZone === 'record' ? 'white' : '#4a1010'} strokeWidth="1" />
-                {/* Label */}
-                <text
-                  textAnchor="middle"
-                  y="18"
-                  fill={touchedZone === 'record' ? 'white' : '#fca5a5'}
-                  fontSize="10"
-                  fontWeight="800"
-                  fontFamily="Cairo, Arial, sans-serif"
-                >
-                  تسجيل جديد
-                </text>
-              </g>
-
-              {/* Blade gap dividers */}
-              {[SA1, SA2, RA2].map((a, i) => {
-                const ip = toCartesian(CX, CY, IR + 3, a);
-                const op = toCartesian(CX, CY, OR - 4, a);
-                return (
-                  <line key={i} x1={ip.x} y1={ip.y} x2={op.x} y2={op.y}
-                    stroke="rgba(0,0,0,0.45)" strokeWidth="2.5" strokeLinecap="round"
-                    style={{ pointerEvents: 'none' }}
-                  />
-                );
-              })}
-            </svg>
-
-            {/* ───── CENTER BUTTON ───── */}
-            <button
-              type="button"
-              onClick={() => {
-                if (menuOpen) {
-                  setMenuOpen(false);
-                  setTouchedZone(null);
-                } else {
-                  haptic(25);
-                  setTouchedZone(null);
-                  setMenuOpen(true);
-                }
-              }}
-              style={{
-                position: 'absolute',
-                left: CX - 30,
-                top: CY - 30,
-                width: 60,
-                height: 60,
-                borderRadius: '50%',
-                transition: 'background 0.2s, transform 0.15s',
-                transform: menuOpen ? 'scale(0.88)' : 'scale(1)',
-              }}
-              className={`flex items-center justify-center cursor-pointer select-none border-2 shadow-2xl ${
-                menuOpen
-                  ? 'bg-[#1e293b] border-white/30 shadow-white/10'
-                  : 'bg-gradient-to-tr from-[#1d4ed8] via-[#2563eb] to-[#0ea5e9] border-white/20 shadow-blue-500/60'
-              }`}
-              aria-label={menuOpen ? 'إغلاق القائمة' : 'فتح قائمة الصوت'}
-            >
-              {menuOpen ? (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round">
-                  <line x1="6" y1="6" x2="18" y2="18" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
-              ) : (
-                <>
-                  {/* Bullseye */}
-                  <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
-                    <div className="w-3.5 h-3.5 rounded-full bg-white shadow-sm" />
-                  </div>
-                  {/* Outer pulse rings */}
-                  <span className="absolute w-[78px] h-[78px] rounded-full border-2 border-sky-400/25 animate-pulse pointer-events-none" />
-                  <span className="absolute w-[96px] h-[96px] rounded-full border border-sky-400/12 animate-pulse pointer-events-none" style={{ animationDelay: '0.6s' }} />
-                </>
-              )}
-            </button>
+              </button>
 
-            {/* ── Hint label ── */}
-            <div
-              style={{ position: 'absolute', left: CX, top: CY + 36, transform: 'translateX(-50%)' }}
-              className="text-[9px] text-gray-500 font-bold whitespace-nowrap pointer-events-none"
-            >
-              {menuOpen ? 'اضغط لإغلاق • اختر وضع الصوت' : 'اضغط للقائمة الصوتية'}
+              {/* 3. RECORD BUTTON (RIGHT) */}
+              <button
+                ref={recordBtnRef}
+                type="button"
+                onClick={() => startVoiceEngine('record')}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-full font-black text-xs transition-all duration-200 cursor-pointer ${
+                  selectedTarget === 'record'
+                    ? 'bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.7)] scale-110 ring-2 ring-rose-300'
+                    : 'bg-white/5 text-rose-300 hover:bg-white/10 active:scale-95'
+                }`}
+              >
+                <span>تسجيل جديد</span>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center ${selectedTarget === 'record' ? 'bg-white text-rose-600' : 'bg-red-500/20 text-rose-300'}`}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
+                    <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
+                    <line x1="12" y1="19" x2="12" y2="22" />
+                  </svg>
+                </div>
+              </button>
+
             </div>
           </div>
+
+          {/* ───── ELEVATED & LARGER MAIN FLOATING BUTTON (70x70) ───── */}
+          <div className="relative pointer-events-auto touch-none">
+            {/* Outer pulsating rings strictly AROUND the button (not inside) */}
+            {!menuOpen && (
+              <div className="absolute -inset-3 rounded-full pointer-events-none flex items-center justify-center">
+                {/* Exterior glow halo */}
+                <span className="absolute -inset-1 rounded-full bg-cyan-400/20 blur-md animate-pulse pointer-events-none" />
+                {/* External concentric ripple ring */}
+                <span className="absolute -inset-2.5 rounded-full border border-sky-400/40 animate-ping opacity-60 pointer-events-none duration-1000" />
+                {/* Wider secondary pulse ring */}
+                <span className="absolute -inset-4 rounded-full border border-cyan-400/20 animate-pulse pointer-events-none" />
+              </div>
+            )}
+
+            <button
+              type="button"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={() => { pointerStartRef.current = null; setIsDragging(false); }}
+              className={`relative w-[70px] h-[70px] rounded-full flex items-center justify-center cursor-pointer select-none transition-all duration-200 shadow-2xl border-2 ${
+                menuOpen
+                  ? 'bg-[#0f172a] border-white/40 shadow-[0_0_30px_rgba(255,255,255,0.2)] scale-95'
+                  : 'bg-gradient-to-tr from-[#1e40af] via-[#2563eb] to-[#06b6d4] border-white/40 shadow-[0_12px_40px_rgba(37,99,235,0.55)] hover:scale-105 active:scale-90'
+              }`}
+              aria-label={menuOpen ? 'إغلاق القائمة' : 'تفعيل التحكم الصوتي'}
+            >
+              {menuOpen ? (
+                // Open state icon (Close X)
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              ) : (
+                // Closed state icon: Clean, crisp microphone without internal dots
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="2" width="6" height="12" rx="3" fill="white" />
+                  <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
+                  <line x1="12" y1="19" x2="12" y2="22" />
+                </svg>
+              )}
+            </button>
+          </div>
+
         </div>
       )}
     </>
   );
 }
+
