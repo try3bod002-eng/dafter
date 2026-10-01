@@ -113,27 +113,21 @@ export default function EntryCard({
       {/* 1. Left Swipe Reveal (dragged to Left, opens on the Right): Green "رد الواجب" */}
       <div
         dir="ltr"
-        className={`absolute inset-y-0 right-0 w-full bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 flex items-center justify-end px-3.5 text-white font-black text-xs sm:text-sm transition-opacity ${
+        className={`absolute inset-y-0 right-0 w-44 bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 flex items-center justify-end px-3.5 text-white font-black text-xs sm:text-sm transition-opacity ${
           offsetX < -5 ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="flex items-center gap-1.5 bg-black/25 px-3 py-1.5 rounded-xl border border-white/25 shadow-md">
-          <span className="text-base">🤝</span>
-          <span className="whitespace-nowrap">رد الواجب</span>
-        </div>
+        <span className="whitespace-nowrap font-black tracking-wide text-white drop-shadow-sm">رد الواجب</span>
       </div>
 
       {/* 2. Right Swipe Reveal (dragged to Right, opens on the Left): Blue "كشف الحساب" */}
       <div
         dir="ltr"
-        className={`absolute inset-y-0 left-0 w-full bg-gradient-to-r from-sky-600 via-blue-600 to-sky-700 flex items-center justify-start px-3.5 text-white font-black text-xs sm:text-sm transition-opacity ${
+        className={`absolute inset-y-0 left-0 w-44 bg-gradient-to-r from-sky-600 via-blue-600 to-sky-700 flex items-center justify-start px-3.5 text-white font-black text-xs sm:text-sm transition-opacity ${
           offsetX > 5 ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="flex items-center gap-1.5 bg-black/25 px-3 py-1.5 rounded-xl border border-white/25 shadow-md">
-          <span className="text-base">📑</span>
-          <span className="whitespace-nowrap">كشف الحساب</span>
-        </div>
+        <span className="whitespace-nowrap font-black tracking-wide text-white drop-shadow-sm">كشف الحساب</span>
       </div>
 
       {/* ── Main Foreground Card (100% Solid Background, Zero Bleed-through) ── */}
@@ -259,13 +253,28 @@ export default function EntryCard({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Strikethrough Checkbox */}
-            <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#94a3b8] cursor-pointer select-none">
+            {/* Strikethrough Checkbox: Disabled if person owes us money */}
+            <label
+              className={`flex items-center gap-1.5 text-[11px] font-bold select-none ${
+                netInfo.status === 'leina'
+                  ? 'opacity-40 cursor-not-allowed text-slate-500'
+                  : 'text-[#94a3b8] cursor-pointer'
+              }`}
+              title={
+                netInfo.status === 'leina'
+                  ? 'لا يمكن الشطب؛ الشخص متبقي عليه فلوس لينا'
+                  : 'شطب القيد'
+              }
+            >
               <input
                 type="checkbox"
+                disabled={netInfo.status === 'leina'}
                 checked={entry.crossed}
-                onChange={(e) => onUpdate(entry.id, { crossed: e.target.checked })}
-                className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+                onChange={(e) => {
+                  if (netInfo.status === 'leina') return;
+                  onUpdate(entry.id, { crossed: e.target.checked });
+                }}
+                className="w-4 h-4 rounded accent-emerald-500 cursor-pointer disabled:cursor-not-allowed"
               />
               <span>شطب (خالص)</span>
             </label>

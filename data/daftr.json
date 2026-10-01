@@ -4,10 +4,43 @@
     "name": "احمد الجوهري",
     "amount": 500,
     "location": "نجير",
-    "notes": "بس",
+    "notes": "📝\nبس",
     "crossed": false,
-    "createdAt": "2026-10-01T15:26:58.946Z",
-    "updatedAt": "2026-10-01T15:27:50.302Z"
+    "createdAt": "2026-10-01T15:26:58.885Z",
+    "updatedAt": "2026-10-01T15:35:54.237Z",
+    "receivedAmount": 10500,
+    "paidAmount": 20500,
+    "transactions": [
+      {
+        "id": "tx_1790868954204",
+        "date": "١‏/١٠‏/٢٠٢٦",
+        "type": "paid",
+        "amount": 10500,
+        "title": "رد واجب في مناسبته"
+      },
+      {
+        "id": "tx_1790868922855",
+        "date": "١‏/١٠‏/٢٠٢٦",
+        "type": "received",
+        "amount": 10000,
+        "title": "نقطة إضافية مستلمة"
+      },
+      {
+        "id": "tx_1790868898447",
+        "date": "١‏/١٠‏/٢٠٢٦",
+        "type": "paid",
+        "amount": 10000,
+        "title": "رد واجب في مناسبته"
+      },
+      {
+        "id": "tx_initial_3",
+        "date": "١‏/١٠‏/٢٠٢٦",
+        "type": "received",
+        "amount": 500,
+        "title": "نقطة مستلمة في فرحنا",
+        "notes": "بس"
+      }
+    ]
   },
   {
     "id": 2,
@@ -17,7 +50,7 @@
     "notes": "📝\nبدون ملاحظات",
     "crossed": true,
     "createdAt": "2026-10-01T15:20:42.294Z",
-    "updatedAt": "2026-10-01T15:30:36.809Z",
+    "updatedAt": "2026-10-01T15:53:20.542Z",
     "nickname": "الجوهري",
     "receivedAmount": 500,
     "paidAmount": 500,

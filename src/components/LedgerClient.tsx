@@ -29,6 +29,9 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   const [selectedStatementEntry, setSelectedStatementEntry] = useState<LedgerEntry | null>(null);
   const [isStatementOpen, setIsStatementOpen] = useState(false);
 
+  // Sort Order State: 'desc' (newest first) or 'asc' (oldest first)
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+
   // Voice Search State
   const [isVoiceSearching, setIsVoiceSearching] = useState(false);
   const searchRecRef = useRef<any>(null);
@@ -273,6 +276,11 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     return true;
   });
 
+  // Sort entries: 'desc' = newest/top first (id high to low), 'asc' = oldest first (id low to high)
+  const sortedEntries = [...filteredEntries].sort((a, b) => {
+    return sortOrder === 'desc' ? b.id - a.id : a.id - b.id;
+  });
+
   return (
     <div className="min-h-screen flex flex-col bg-[#090d16] text-[#f8fafc] pb-64">
       {/* Top Header */}
@@ -388,16 +396,26 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
           </div>
         </div>
 
-        {/* Database Status indicator */}
+        {/* Database Status indicator & Sort Order Toggle */}
         <div className="flex items-center justify-between text-xs text-[#94a3b8] px-1 mb-3">
           <div>
-            نتائج البحث: <span className="text-[#38bdf8] font-bold">{filteredEntries.length}</span> من إجمالي{' '}
+            نتائج البحث: <span className="text-[#38bdf8] font-bold">{sortedEntries.length}</span> من إجمالي{' '}
             <span className="text-white font-bold">{entries.length}</span> قيد بالداتابيز
           </div>
+
+          {/* Sort Order Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#111827] border border-[#1f293d] hover:border-sky-400 text-xs font-bold text-slate-300 hover:text-white transition-all cursor-pointer shadow-sm active:scale-95"
+            title="تبديل ترتيب الكروت"
+          >
+            <span>{sortOrder === 'desc' ? '⬇️ الأحدث أولاً' : '⬆️ الأقدم أولاً'}</span>
+          </button>
         </div>
 
         {/* Entries List */}
-        {filteredEntries.length === 0 ? (
+        {sortedEntries.length === 0 ? (
           <div className="bg-[#111827] border border-[#1f293d] rounded-2xl p-8 text-center text-[#94a3b8] my-4">
             <span className="text-3xl block mb-2">🔍</span>
             <p className="font-bold text-sm text-white mb-1">لم يتم العثور على أي نتائج مطابقة</p>
@@ -405,7 +423,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredEntries.map((entry) => (
+            {sortedEntries.map((entry) => (
               <EntryCard
                 key={entry.id}
                 entry={entry}
