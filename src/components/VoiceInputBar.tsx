@@ -16,90 +16,40 @@ const EXAMPLES = [
 ];
 
 export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
-  // Default to 'click' for maximum mobile reliability
   const [triggerMode, setTriggerMode] = useState<'click' | 'hold'>('click');
   const [isRecording, setIsRecording] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
   const [exampleIdx, setExampleIdx] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isInAppBrowser, setIsInAppBrowser] = useState(false);
-  const [micStatus, setMicStatus] = useState<'prompt' | 'granted' | 'denied' | 'unknown'>('unknown');
+  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [quickInput, setQuickInput] = useState('');
 
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef('');
   const isRecordingRef = useRef(false);
 
-  // Keep ref in sync to avoid stale state in event handlers
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
 
-  // Check environment on mount (In-App Browser & Permissions)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const ua = navigator.userAgent || '';
       const inApp = /FBAN|FBAV|Instagram|WhatsApp|Line|Twitter|Snapchat|Telegram/i.test(ua);
       setIsInAppBrowser(inApp);
-
-      // Check mic permission status if supported
-      if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions
-          .query({ name: 'microphone' as any })
-          .then((permissionStatus) => {
-            setMicStatus(permissionStatus.state as any);
-            permissionStatus.onchange = () => {
-              setMicStatus(permissionStatus.state as any);
-            };
-          })
-          .catch(() => {});
-      }
     }
   }, []);
 
-  const [showHelpModal, setShowHelpModal] = useState(false);
-
-  // Explicitly prompt the native browser microphone dialog
-  const requestMicPermission = async (): Promise<boolean> => {
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Stop stream immediately so SpeechRecognition has full exclusive mic access
-        stream.getTracks().forEach((track) => track.stop());
-        setMicStatus('granted');
-        setErrorMessage(null);
-        setShowHelpModal(false);
-        return true;
-      } catch (err: any) {
-        console.warn('Microphone permission request error:', err);
-        setMicStatus('denied');
-        setShowHelpModal(true);
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          setErrorMessage('تم حظر المايكروفون في المتصفح. اتبع الخطوات بالأسفل لتفعيله.');
-        } else {
-          setErrorMessage('تعذر الوصول إلى المايكروفون. تأكد من تفعيله في إعدادات الهاتف.');
-        }
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const startListening = async () => {
+  const startListening = () => {
     if (isRecordingRef.current) return;
     setErrorMessage(null);
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setErrorMessage(
-        'متصفحك الحالي لا يدعم التعرف الصوتي المباشر. يُفضل فتح الرابط في متصفح Google Chrome أو Safari الحديث.'
-      );
+      setErrorMessage('متصفحك لا يدعم التعرف الصوتي المباشر. يرجى فتح الموقع في متصفح Google Chrome.');
+      setShowHelpModal(true);
       return;
-    }
-
-    // If permission not yet granted, request it first to trigger the browser system prompt
-    if (micStatus !== 'granted') {
-      const granted = await requestMicPermission();
-      if (!granted) return;
     }
 
     try {
@@ -109,10 +59,7 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
 
       const rec = new SpeechRecognition();
       rec.lang = 'ar-EG';
-      
-      // On mobile devices, continuous=false prevents immediate silent timeout/crashes
-      const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      rec.continuous = !isMobile;
+      rec.continuous = true;
       rec.interimResults = true;
 
       transcriptRef.current = '';
@@ -120,7 +67,6 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
       setExampleIdx((prev) => (prev + 1) % EXAMPLES.length);
       setIsRecording(true);
 
-      // Haptic feedback on phones if available
       try {
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
           navigator.vibrate(50);
@@ -128,40 +74,52 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
       } catch {}
 
       rec.onresult = (e: any) => {
-        let text = '';
-        for (let i = e.resultIndex; i < e.results.length; ++i) {
-          text += e.results[i][0].transcript;
+        let fullText = '';
+        for (let i = 0; i < e.results.length; i++) {
+          fullText += e.results[i][0].transcript + ' ';
         }
-        const trimmed = text.trim();
-        transcriptRef.current = trimmed;
-        setLiveTranscript(trimmed);
+        const trimmed = fullText.trim();
+        if (trimmed) {
+          transcriptRef.current = trimmed;
+          setLiveTranscript(trimmed);
+        }
       };
 
-      rec.onerror = async (e: any) => {
-        console.error('Speech recognition error:', e);
+      rec.onerror = (e: any) => {
+        console.warn('Speech recognition status:', e.error);
         if (e.error === 'not-allowed') {
-          setMicStatus('denied');
-          // Try prompting via getUserMedia
-          await requestMicPermission();
+          setIsRecording(false);
+          setShowHelpModal(true);
+          setErrorMessage('تم حظر المايكروفون في المتصفح أو إعدادات الهاتف.');
         } else if (e.error === 'no-speech') {
-          // No speech detected, not fatal
+          // Keep active, let user speak
         } else if (e.error === 'audio-capture') {
-          setErrorMessage('المايكروفون غير متصل أو قيد الاستخدام بواسطة تطبيق آخر.');
+          setErrorMessage('المايكروفون غير متصل أو مشغول بتطبيق آخر.');
           setIsRecording(false);
         } else if (e.error === 'network') {
-          setErrorMessage('خطأ في الاتصال بخدمة التعرف الصوتي. تأكد من اتصال الإنترنت.');
-          setIsRecording(false);
+          // If network glitch occurs on Google server, finalize if we already have speech
+          if (transcriptRef.current) {
+            setIsRecording(false);
+            const parsed = parseSpokenSentence(transcriptRef.current);
+            onNewEntry(parsed);
+          }
         }
       };
 
       rec.onend = () => {
-        // If recording was active and we captured speech, finalize it
         if (isRecordingRef.current) {
-          setIsRecording(false);
-          const finalRaw = transcriptRef.current;
-          if (finalRaw) {
-            const parsed = parseSpokenSentence(finalRaw);
+          // If still recording but recognition ended with text, finalize
+          if (transcriptRef.current) {
+            setIsRecording(false);
+            const parsed = parseSpokenSentence(transcriptRef.current);
             onNewEntry(parsed);
+          } else {
+            // If ended with no text yet (e.g. mobile timeout), restart seamlessly
+            try {
+              rec.start();
+            } catch {
+              setIsRecording(false);
+            }
           }
         }
       };
@@ -171,7 +129,7 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
     } catch (err: any) {
       console.error('Failed to start speech recognition:', err);
       setIsRecording(false);
-      setErrorMessage('تعذر بدء التعرف الصوتي. يرجى إعادة المحاولة أو التأكد من إذن المايك.');
+      setShowHelpModal(true);
     }
   };
 
@@ -189,10 +147,11 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
     if (finalRaw) {
       const parsed = parseSpokenSentence(finalRaw);
       onNewEntry(parsed);
+      transcriptRef.current = '';
+      setLiveTranscript('');
     }
   };
 
-  // Click Mode Handlers
   const handleToggleClick = () => {
     if (isRecording) {
       stopListening();
@@ -201,17 +160,20 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
     }
   };
 
-  // Hold Mode Handlers
   const handleHoldStart = () => {
-    if (triggerMode === 'hold') {
-      startListening();
-    }
+    if (triggerMode === 'hold') startListening();
   };
 
   const handleHoldEnd = () => {
-    if (triggerMode === 'hold' && isRecordingRef.current) {
-      stopListening();
-    }
+    if (triggerMode === 'hold' && isRecordingRef.current) stopListening();
+  };
+
+  const handleQuickSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickInput.trim()) return;
+    const parsed = parseSpokenSentence(quickInput.trim());
+    onNewEntry(parsed);
+    setQuickInput('');
   };
 
   return (
@@ -221,7 +183,7 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
         <div className="fixed top-2 inset-x-3 z-50 bg-[#f59e0b] text-[#1e1b4b] p-3 rounded-xl shadow-2xl flex items-center justify-between text-xs sm:text-sm font-bold border border-amber-300">
           <div className="flex items-center gap-2">
             <span className="text-lg">⚠️</span>
-            <span>أنت تفتح التطبيق داخل واتساب أو فيسبوك! لتشغيل المايك اضغط على (⫶) واختر &quot;فتح في المتصفح Chrome&quot;.</span>
+            <span>أنت تفتح التطبيق داخل واتساب! لتشغيل المايك اضغط على (⫶) واختر &quot;فتح في المتصفح Chrome&quot;.</span>
           </div>
           <button
             onClick={() => setIsInAppBrowser(false)}
@@ -250,71 +212,42 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
               </button>
             </div>
 
-            <p className="text-xs text-[#94a3b8] mb-4 leading-relaxed">
-              إذا لم تظهر علامة القفل القديمة، فذلك لأن متصفح Chrome الحديث استبدلها بأيقونة إعدادات جديدة. اتبع إحدى الطرق البسيطة التالية:
-            </p>
-
-            {/* Android Chrome Section */}
             <div className="bg-[#1e293b]/70 border border-[#334155] rounded-xl p-3.5 mb-3 text-xs leading-relaxed">
               <div className="font-black text-[#38bdf8] text-sm mb-2 flex items-center gap-1.5">
                 <span>📱</span>
                 <span>لهواتف أندرويد (Google Chrome):</span>
               </div>
               <ol className="list-decimal list-inside space-y-2 text-[#e2e8f0]">
-                <li>
-                  <strong>أيقونة التحكم (🎛️ أو ⚙️):</strong> انظر لشريط الرابط بالأعلى بجانب اسم الموقع، اضغط على أيقونة الإعدادات/الشرطتين، ثم اختر <strong>&quot;الأذونات&quot;</strong> وفعّل <strong>الميكروفون (سماح)</strong>.
+                <li className="bg-[#0284c7]/20 p-2 rounded-lg border border-[#0284c7]/40">
+                  <strong className="text-[#38bdf8]">إعدادات الهاتف الأساسية:</strong><br />
+                  افتح <strong>إعدادات الهاتف (Settings)</strong> ⬅️ <strong>التطبيقات (Apps)</strong> ⬅️ <strong>Chrome</strong> ⬅️ <strong>الأذونات (Permissions)</strong> ⬅️ فعّل <strong>الميكروفون (السماح عند استخدام التطبيق)</strong>.
                 </li>
                 <li>
-                  <strong>أو من قائمة المتصفح:</strong> اضغط على الثلاث نقاط (⫶) أعلى الشاشة ⬅️ <strong>الإعدادات</strong> ⬅️ <strong>إعدادات المواقع الإلكترونية</strong> ⬅️ <strong>الميكروفون</strong> ⬅️ فعّل السماح للموقع.
+                  <strong>من شريط الرابط:</strong> اضغط على أيقونة الإعدادات/الشرطتين (🎛️) بجانب الرابط ⬅️ <strong>الأذونات</strong> ⬅️ فعّل <strong>الميكروفون</strong>.
                 </li>
               </ol>
-            </div>
-
-            {/* iPhone Safari Section */}
-            <div className="bg-[#1e293b]/70 border border-[#334155] rounded-xl p-3.5 mb-4 text-xs leading-relaxed">
-              <div className="font-black text-[#a78bfa] text-sm mb-2 flex items-center gap-1.5">
-                <span>🍏</span>
-                <span>لهواتف آيفون (Safari):</span>
-              </div>
-              <p className="text-[#e2e8f0]">
-                اضغط على زر <strong>&quot;aA&quot;</strong> أو <strong>&quot;ع‌ع&quot;</strong> بجانب الرابط ⬅️ اختر <strong>إعدادات موقع الويب (Website Settings)</strong> ⬅️ الميكروفون ⬅️ اختر <strong>سماح (Allow)</strong>.
-              </p>
             </div>
 
             <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 border-t border-[#1e293b]">
               <button
                 type="button"
-                onClick={requestMicPermission}
+                onClick={() => {
+                  setShowHelpModal(false);
+                  startListening();
+                }}
                 className="w-full sm:flex-1 bg-gradient-to-r from-[#0284c7] to-[#38bdf8] text-[#090d16] font-black py-2.5 px-4 rounded-xl text-xs hover:brightness-110 cursor-pointer shadow-lg"
               >
-                🔄 إعادة فحص وتفعيل المايك الآن
+                🔄 تجربة المايك الآن
               </button>
               <button
                 type="button"
                 onClick={() => setShowHelpModal(false)}
                 className="w-full sm:w-auto bg-[#334155] text-white font-bold py-2.5 px-5 rounded-xl text-xs hover:bg-[#475569] cursor-pointer"
               >
-                فهمت، إغلاق
+                إغلاق
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Quick Error Banner if modal closed */}
-      {errorMessage && !showHelpModal && (
-        <div className="fixed top-16 inset-x-4 max-w-md mx-auto z-40 bg-[#1e1215] border-2 border-[#ef4444] text-[#fca5a5] p-3.5 rounded-2xl shadow-2xl flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-bold">
-            <span>🎙️❌</span>
-            <span>{errorMessage}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowHelpModal(true)}
-            className="bg-[#ef4444] text-white text-[11px] font-black px-2.5 py-1 rounded-lg cursor-pointer hover:bg-[#dc2626]"
-          >
-            كيف أفعّله؟
-          </button>
         </div>
       )}
 
@@ -358,15 +291,42 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
 
           {/* Real-time speech transcript */}
           <div className="bg-[#040711] text-[#38bdf8] text-sm sm:text-base font-black p-3 rounded-xl min-h-[44px] flex items-center shadow-inner border border-[#1e293d]">
-            {liveTranscript ? liveTranscript : <span className="text-[#64748b] font-normal">في انتظار صوتك...</span>}
+            {liveTranscript ? (
+              <span className="text-white font-black">{liveTranscript}</span>
+            ) : (
+              <span className="text-[#64748b] font-normal flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#38bdf8] animate-pulse"></span>
+                في انتظار صوتك... تكلم الآن
+              </span>
+            )}
           </div>
         </div>
       )}
 
-      {/* Bottom Sticky Action Bar */}
+      {/* Bottom Sticky Action Area */}
       <div className="fixed inset-x-0 bottom-0 z-40 bg-[#090d16]/96 backdrop-blur-md border-t border-[#1f293d] p-3 sm:pb-4 shadow-2xl">
-        <div className="max-w-md mx-auto flex flex-col items-center gap-2">
-          {/* Trigger mode selector pills & Mic permission indicator */}
+        <div className="max-w-md mx-auto flex flex-col items-center gap-2.5">
+          {/* Quick Speech / Text Input Form (Works with phone keyboard microphone!) */}
+          <form onSubmit={handleQuickSubmit} className="w-full flex items-center gap-1.5">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={quickInput}
+                onChange={(e) => setQuickInput(e.target.value)}
+                placeholder="💡 انطق بمايك الكيبورد أو اكتب (مثال: الاسم محمد 500)"
+                className="w-full bg-[#111827] text-white text-xs sm:text-sm rounded-xl px-3 py-2 border border-[#1f2e4a] focus:border-[#38bdf8] focus:outline-none placeholder-[#64748b]"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!quickInput.trim()}
+              className="bg-[#0284c7] hover:bg-[#0369a1] disabled:opacity-40 text-white font-black text-xs px-3.5 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap"
+            >
+              تسجيل ⚡
+            </button>
+          </form>
+
+          {/* Mode Selector */}
           <div className="w-full flex items-center justify-between px-1">
             <div className="flex items-center gap-1 bg-[#111827] p-1 rounded-full border border-[#1f293d] text-xs font-bold">
               <button
@@ -389,25 +349,16 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
               </button>
             </div>
 
-            {/* Mic Permission test button */}
             <button
               type="button"
-              onClick={requestMicPermission}
-              title="فحص وتفعيل إذن المايك"
-              className={`text-[11px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
-                micStatus === 'granted'
-                  ? 'border-emerald-500/40 text-emerald-400 bg-emerald-950/30'
-                  : micStatus === 'denied'
-                  ? 'border-rose-500/40 text-rose-400 bg-rose-950/30 animate-pulse'
-                  : 'border-[#334155] text-[#94a3b8] bg-[#111827] hover:text-white'
-              }`}
+              onClick={() => setShowHelpModal(true)}
+              className="text-[11px] font-bold text-[#94a3b8] hover:text-white px-2 py-1"
             >
-              <span>{micStatus === 'granted' ? '✅' : '🎙️'}</span>
-              <span>{micStatus === 'granted' ? 'المايك مفعل' : 'إذن المايك'}</span>
+              مساعدة المايك ❓
             </button>
           </div>
 
-          {/* Main Interactive Button */}
+          {/* Main Voice Button */}
           {triggerMode === 'click' ? (
             <button
               type="button"
@@ -420,7 +371,7 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
             >
               <span className="text-xl">🎙️</span>
               <span>
-                {isRecording ? 'جاري الاستماع... اضغط هنا للإنهاء والحفظ' : 'اضغط للتسجيل الصوتي (بالعامية المصرية)'}
+                {isRecording ? 'بيسمعك الآن... اضغط هنا للإنهاء والحفظ' : 'اضغط للتسجيل الصوتي (بالعامية المصرية)'}
               </span>
             </button>
           ) : (
