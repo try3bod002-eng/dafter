@@ -15,4 +15,6 @@ export interface LedgerStats {
   crossedCount: number;
   activeCount: number;
   settlementsCount: number;
+  totalCrossedAmount: number;
+  totalAlinaAmount: number;
 }

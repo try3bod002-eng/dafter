@@ -61,12 +61,23 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     const totalAmount = currentEntries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     const crossedCount = currentEntries.filter((e) => e.crossed).length;
     const activeCount = totalCount - crossedCount;
-    const settlementsCount = currentEntries.filter((e) =>
-      e.notes.includes('كان عليه') ||
-      e.notes.includes('علينا') ||
-      e.location.includes('كان عليه') ||
-      e.location.includes('علينا')
-    ).length;
+    const totalCrossedAmount = currentEntries
+      .filter((e) => e.crossed)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+    let totalAlinaAmount = 0;
+    let settlementsCount = 0;
+
+    currentEntries.forEach((e) => {
+      const text = `${e.location} ${e.notes}`;
+      const hasSettlement = text.includes('كان عليه') || text.includes('علينا') || text.includes('عليه');
+      if (hasSettlement) settlementsCount++;
+
+      const alinaMatch = text.match(/علينا\s*(\d+)/);
+      if (alinaMatch) {
+        totalAlinaAmount += parseInt(alinaMatch[1], 10);
+      }
+    });
 
     setStats({
       totalCount,
@@ -74,6 +85,8 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       crossedCount,
       activeCount,
       settlementsCount,
+      totalCrossedAmount,
+      totalAlinaAmount,
     });
   };
 

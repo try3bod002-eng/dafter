@@ -100,9 +100,23 @@ export function getStats(): LedgerStats {
   const totalAmount = entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
   const crossedCount = entries.filter(e => e.crossed).length;
   const activeCount = totalCount - crossedCount;
-  const settlementsCount = entries.filter(e => 
-    e.notes.includes('كان عليه') || e.notes.includes('علينا') || e.location.includes('كان عليه') || e.location.includes('علينا')
-  ).length;
+  const totalCrossedAmount = entries
+    .filter(e => e.crossed)
+    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+  let totalAlinaAmount = 0;
+  let settlementsCount = 0;
+
+  entries.forEach(e => {
+    const text = `${e.location} ${e.notes}`;
+    const hasSettlement = text.includes('كان عليه') || text.includes('علينا') || text.includes('عليه');
+    if (hasSettlement) settlementsCount++;
+
+    const alinaMatch = text.match(/علينا\s*(\d+)/);
+    if (alinaMatch) {
+      totalAlinaAmount += parseInt(alinaMatch[1], 10);
+    }
+  });
 
   return {
     totalCount,
@@ -110,5 +124,7 @@ export function getStats(): LedgerStats {
     crossedCount,
     activeCount,
     settlementsCount,
+    totalCrossedAmount,
+    totalAlinaAmount,
   };
 }
