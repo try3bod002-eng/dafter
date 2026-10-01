@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { parseSpokenSentence } from '@/lib/speechParser';
+import { parseSpokenSentence, extractCleanTranscript } from '@/lib/speechParser';
 
 interface VoiceInputBarProps {
   onNewEntry: (entry: { name: string; amount: number; location: string; notes: string; crossed: boolean }) => void;
@@ -73,20 +73,7 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
       } catch {}
 
       rec.onresult = (e: any) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-
-        for (let i = 0; i < e.results.length; i++) {
-          const res = e.results[i];
-          if (res.isFinal) {
-            finalTranscript += res[0].transcript + ' ';
-          } else {
-            // On mobile Chrome, non-final results accumulate in sequence, take the latest full hypothesis
-            interimTranscript = res[0].transcript;
-          }
-        }
-
-        const fullSentence = `${finalTranscript} ${interimTranscript}`.trim().replace(/\s+/g, ' ');
+        const fullSentence = extractCleanTranscript(e.results);
         if (fullSentence) {
           transcriptRef.current = fullSentence;
           setLiveTranscript(fullSentence);

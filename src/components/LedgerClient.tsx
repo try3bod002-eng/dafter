@@ -7,9 +7,9 @@ import EntryCard from '@/components/EntryCard';
 import VoiceInputBar from '@/components/VoiceInputBar';
 import ManualAddModal from '@/components/ManualAddModal';
 import { LedgerEntry, LedgerStats } from '@/types/ledger';
-import { matchesArabicSearch } from '@/lib/speechParser';
+import { matchesArabicSearch, extractCleanTranscript } from '@/lib/speechParser';
 
-const LOCAL_STORAGE_DB_KEY = 'daftr_nuqta_live_db_v3';
+const LOCAL_STORAGE_DB_KEY = 'daftr_nuqta_live_db_v4';
 
 interface LedgerClientProps {
   initialEntries: LedgerEntry[];
@@ -179,19 +179,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       setIsVoiceSearching(true);
 
       rec.onresult = (e: any) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-
-        for (let i = 0; i < e.results.length; i++) {
-          const res = e.results[i];
-          if (res.isFinal) {
-            finalTranscript += res[0].transcript + ' ';
-          } else {
-            interimTranscript = res[0].transcript;
-          }
-        }
-
-        const fullSentence = `${finalTranscript} ${interimTranscript}`.trim().replace(/\s+/g, ' ');
+        const fullSentence = extractCleanTranscript(e.results);
         const cleaned = fullSentence
           .replace(/^(ابحث عن|دور على|هاتلي|هات|اسم)\s+/g, '')
           .trim();

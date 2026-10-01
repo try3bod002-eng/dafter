@@ -137,3 +137,39 @@ export function matchesArabicSearch(target: string, query: string): boolean {
 
   return tokens.every((token) => normTarget.includes(token));
 }
+
+export function extractCleanTranscript(results: any): string {
+  if (!results || results.length === 0) return '';
+
+  const sentences: string[] = [];
+
+  for (let i = 0; i < results.length; i++) {
+    const text = (results[i][0]?.transcript || '').trim();
+    if (!text) continue;
+
+    if (sentences.length === 0) {
+      sentences.push(text);
+    } else {
+      const last = sentences[sentences.length - 1];
+      // Android Chromium progressive revision check:
+      // If the current phrase contains or starts with the previous phrase, replace it!
+      if (text.startsWith(last) || text.includes(last)) {
+        sentences[sentences.length - 1] = text;
+      } else if (last.startsWith(text)) {
+        // Keep the longer previous version
+      } else {
+        sentences.push(text);
+      }
+    }
+  }
+
+  let merged = sentences.join(' ').replace(/\s+/g, ' ').trim();
+  // Strip accidental consecutive repetitions of trigger words
+  merged = merged
+    .replace(/(الاسم)(?:\s+الاسم)+/gi, 'الاسم')
+    .replace(/(المبلغ)(?:\s+المبلغ)+/gi, 'المبلغ')
+    .replace(/(البلد)(?:\s+البلد)+/gi, 'البلد')
+    .replace(/(الملاحظات)(?:\s+الملاحظات)+/gi, 'الملاحظات');
+
+  return merged;
+}
