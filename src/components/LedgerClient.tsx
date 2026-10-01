@@ -275,27 +275,30 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={
                 isVoiceSearching
-                  ? '🎙️ بيسمعك الآن... انطق اسم الشخص أو البلد للبحث...'
-                  : '🔍 ابحث باسم الشخص أو البلد أو بالصوت...'
+                  ? 'بيسمعك الآن... انطق اسم الشخص أو البلد...'
+                  : 'ابحث بالاسم أو البلد...'
               }
-              className={`w-full bg-[#111827] border rounded-xl py-2.5 pr-10 pl-24 text-sm font-bold text-white outline-none transition-all ${
+              className={`w-full bg-[#111827] border rounded-2xl py-3 pr-11 pl-24 text-sm font-bold text-white outline-none transition-all placeholder:text-[#64748b] placeholder:text-xs sm:placeholder:text-sm shadow-inner ${
                 isVoiceSearching
                   ? 'border-[#ef4444] shadow-lg shadow-[#ef4444]/20 animate-pulse placeholder-[#f87171]'
-                  : 'border-[#1f293d] focus:border-[#38bdf8]'
+                  : 'border-[#1f293d] focus:border-[#38bdf8] focus:bg-[#0f172a]'
               }`}
             />
-            {/* Search Icon */}
-            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#94a3b8] text-sm">
-              🔍
+            {/* Single Crisp Search Icon */}
+            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#64748b] pointer-events-none flex items-center justify-center">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
             </span>
 
             {/* Clear Button & Voice Search Button inside input */}
-            <div className="absolute left-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+            <div className="absolute left-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="w-6 h-6 rounded-lg bg-[#1f293d] hover:bg-[#334155] text-[#94a3b8] hover:text-white flex items-center justify-center text-xs font-bold transition-all cursor-pointer"
+                  className="w-7 h-7 rounded-xl bg-[#1f293d] hover:bg-[#334155] text-[#94a3b8] hover:text-white flex items-center justify-center text-xs font-bold transition-all cursor-pointer"
                   title="مسح البحث"
                 >
                   ✕
@@ -305,10 +308,10 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
               <button
                 type="button"
                 onClick={toggleVoiceSearch}
-                className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 transition-all cursor-pointer select-none ${
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 transition-all cursor-pointer select-none ${
                   isVoiceSearching
                     ? 'bg-[#ef4444] text-white shadow-md shadow-[#ef4444]/40 animate-bounce'
-                    : 'bg-[#1f2e4a] text-[#38bdf8] hover:bg-[#2d456b]'
+                    : 'bg-[#1e293b] text-[#38bdf8] hover:bg-[#2d456b] border border-sky-400/20'
                 }`}
                 title="بحث بالصوت"
               >
@@ -318,13 +321,13 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
             </div>
           </div>
 
-          {/* Filter Chips */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {/* Filter Chips (No Scrollbar) */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
             <button
               onClick={() => setStatusFilter('all')}
               className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${
                 statusFilter === 'all'
-                  ? 'bg-[#38bdf8] text-[#090d16] border border-[#38bdf8]'
+                  ? 'bg-[#38bdf8] text-[#090d16] border border-[#38bdf8] shadow-sm shadow-[#38bdf8]/30'
                   : 'bg-[#111827] text-[#94a3b8] border border-[#1f293d] hover:text-white'
               }`}
             >
@@ -334,7 +337,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
               onClick={() => setStatusFilter('pending')}
               className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${
                 statusFilter === 'pending'
-                  ? 'bg-[#38bdf8] text-[#090d16] border border-[#38bdf8]'
+                  ? 'bg-[#38bdf8] text-[#090d16] border border-[#38bdf8] shadow-sm shadow-[#38bdf8]/30'
                   : 'bg-[#111827] text-[#94a3b8] border border-[#1f293d] hover:text-white'
               }`}
             >
@@ -344,7 +347,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
               onClick={() => setStatusFilter('crossed')}
               className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${
                 statusFilter === 'crossed'
-                  ? 'bg-[#38bdf8] text-[#090d16] border border-[#38bdf8]'
+                  ? 'bg-[#38bdf8] text-[#090d16] border border-[#38bdf8] shadow-sm shadow-[#38bdf8]/30'
                   : 'bg-[#111827] text-[#94a3b8] border border-[#1f293d] hover:text-white'
               }`}
             >
@@ -354,7 +357,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
               onClick={() => setStatusFilter('settlements')}
               className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${
                 statusFilter === 'settlements'
-                  ? 'bg-[#fbbf24] text-[#090d16] border border-[#fbbf24]'
+                  ? 'bg-[#fbbf24] text-[#090d16] border border-[#fbbf24] shadow-sm shadow-[#fbbf24]/30'
                   : 'bg-[#111827] text-[#94a3b8] border border-[#1f293d] hover:text-white'
               }`}
             >
