@@ -33,6 +33,7 @@ export function parseEgyptianArabicNumbers(text: string): number | null {
 
 export interface ParsedSpokenEntry {
   name: string;
+  nickname?: string;
   amount: number;
   location: string;
   notes: string;
@@ -42,6 +43,7 @@ export interface ParsedSpokenEntry {
 export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
   const raw = rawText.trim();
   let name = '';
+  let nickname = '';
   let amount: number | null = null;
   let location = '';
   let notes = '';
@@ -49,12 +51,12 @@ export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
   // NOTE: 'من' intentionally removed from keywords — it appears inside common Arabic names
   // like الرحمن، عثمان، سليمان، رمضان and causes incorrect mid-name splits.
   // Use explicit word-boundary matching (space before/after) to avoid false positives.
-  const KEY_RE = /((?:^|\s)(الاسم|اسم|المبلغ|مبلغ|البلد|بلد|الملاحظات|ملاحظات|الملاحظة|ملاحظة)(?=\s|$))/;
+  const KEY_RE = /((?:^|\s)(الاسم|اسم|اللقب|لقب|الشهرة|شهرة|المبلغ|مبلغ|البلد|بلد|الملاحظات|ملاحظات|الملاحظة|ملاحظة)(?=\s|$))/;
   const hasTags = KEY_RE.test(raw);
 
   if (hasTags) {
     // Split on standalone keywords (preceded and followed by space or boundary)
-    const tokens = raw.split(/((?:^|(?<=\s))(الاسم|اسم|المبلغ|مبلغ|البلد|بلد|الملاحظات|ملاحظات|الملاحظة|ملاحظة)(?=\s|$))/);
+    const tokens = raw.split(/((?:^|(?<=\s))(الاسم|اسم|اللقب|لقب|الشهرة|شهرة|المبلغ|مبلغ|البلد|بلد|الملاحظات|ملاحظات|الملاحظة|ملاحظة)(?=\s|$))/);
     let cur = '';
 
     for (let i = 0; i < tokens.length; i++) {
@@ -62,11 +64,13 @@ export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
       if (!t) continue;
 
       if (['الاسم', 'اسم'].includes(t)) cur = 'name';
+      else if (['اللقب', 'لقب', 'الشهرة', 'شهرة'].includes(t)) cur = 'nickname';
       else if (['المبلغ', 'مبلغ'].includes(t)) cur = 'amount';
-      else if (['البلد', 'بلد'].includes(t)) cur = 'location'; // 'من' removed — too common in Arabic names
+      else if (['البلد', 'بلد'].includes(t)) cur = 'location';
       else if (['الملاحظات', 'ملاحظات', 'الملاحظة', 'ملاحظة'].includes(t)) cur = 'notes';
       else {
         if (cur === 'name' && !name) name = t;
+        else if (cur === 'nickname' && !nickname) nickname = t;
         else if (cur === 'amount' && amount === null) amount = parseEgyptianArabicNumbers(t);
         else if (cur === 'location' && !location) location = t;
         else if (cur === 'notes' && !notes) notes = t;
@@ -100,6 +104,13 @@ export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
 
   name = name.replace(/^(سجل|اكتب|ضيف|حط|سجل عندك|ضيف عندك)\s+/g, '').replace(/(احفظ|خلاص)$/g, '').trim();
 
+  // If nickname was written in parentheses in the name e.g. "أشرف الحديدي (أبو طارق)"
+  const parenMatch = name.match(/^(.*?)\s*[\(\[（](.*?)[\)\]）]\s*$/);
+  if (parenMatch && !nickname) {
+    name = parenMatch[1].trim();
+    nickname = parenMatch[2].trim();
+  }
+
   if (raw.includes('خالص') && (!notes || !notes.includes('خالص'))) {
     notes = notes ? `${notes} - خالص` : 'خالص';
   }
@@ -108,6 +119,7 @@ export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
 
   return {
     name: name || 'اسم غير محدد',
+    nickname: nickname || undefined,
     amount: amount !== null ? amount : 200,
     location: location || '',
     notes: notes || '',

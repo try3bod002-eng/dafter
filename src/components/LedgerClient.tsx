@@ -6,10 +6,11 @@ import StatsCards from '@/components/StatsCards';
 import EntryCard from '@/components/EntryCard';
 import VoiceInputBar from '@/components/VoiceInputBar';
 import ManualAddModal from '@/components/ManualAddModal';
-import { LedgerEntry, LedgerStats } from '@/types/ledger';
+import StatementModal from '@/components/StatementModal';
+import { LedgerEntry, LedgerStats, calculateNetBalance } from '@/types/ledger';
 import { matchesArabicSearch, extractCleanTranscript } from '@/lib/speechParser';
 
-const LOCAL_STORAGE_DB_KEY = 'daftr_nuqta_live_db_v4';
+const LOCAL_STORAGE_DB_KEY = 'daftr_nuqta_live_db_v5';
 
 interface LedgerClientProps {
   initialEntries: LedgerEntry[];
@@ -23,6 +24,10 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'crossed' | 'settlements'>('all');
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Statement / Ledger Profile Modal State
+  const [selectedStatementEntry, setSelectedStatementEntry] = useState<LedgerEntry | null>(null);
+  const [isStatementOpen, setIsStatementOpen] = useState(false);
 
   // Voice Search State
   const [isVoiceSearching, setIsVoiceSearching] = useState(false);
@@ -58,26 +63,31 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
 
   const calculateAndSetStats = (currentEntries: LedgerEntry[]) => {
     const totalCount = currentEntries.length;
-    const totalAmount = currentEntries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-    const crossedCount = currentEntries.filter((e) => e.crossed).length;
-    const activeCount = totalCount - crossedCount;
-    const totalCrossedAmount = currentEntries
-      .filter((e) => e.crossed)
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const totalAmount = currentEntries.reduce(
+      (sum, e) => sum + (Number(e.receivedAmount ?? e.amount) || 0),
+      0
+    );
 
+    let crossedCount = 0;
+    let totalCrossedAmount = 0;
     let totalAlinaAmount = 0;
+    let totalLeinaAmount = 0;
     let settlementsCount = 0;
 
     currentEntries.forEach((e) => {
-      const text = `${e.location} ${e.notes}`;
-      const hasSettlement = text.includes('كان عليه') || text.includes('علينا') || text.includes('عليه');
-      if (hasSettlement) settlementsCount++;
-
-      const alinaMatch = text.match(/علينا\s*(\d+)/);
-      if (alinaMatch) {
-        totalAlinaAmount += parseInt(alinaMatch[1], 10);
+      const net = calculateNetBalance(e);
+      if (net.status === 'khalis' || e.crossed) {
+        crossedCount++;
+        totalCrossedAmount += (Number(e.paidAmount ?? e.amount) || 0);
+      } else if (net.status === 'alina') {
+        settlementsCount++;
+        totalAlinaAmount += net.netAmount;
+      } else if (net.status === 'leina') {
+        totalLeinaAmount += net.netAmount;
       }
     });
+
+    const activeCount = totalCount - crossedCount;
 
     setStats({
       totalCount,
@@ -87,6 +97,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       settlementsCount,
       totalCrossedAmount,
       totalAlinaAmount,
+      totalLeinaAmount,
     });
   };
 
@@ -103,6 +114,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   // Add Handler
   const handleAddNewEntry = async (newEntryData: {
     name: string;
+    nickname?: string;
     amount: number;
     location: string;
     notes: string;
@@ -112,7 +124,10 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     const newEntry: LedgerEntry = {
       id: maxId + 1,
       name: newEntryData.name.trim(),
+      nickname: newEntryData.nickname?.trim() || undefined,
       amount: Number(newEntryData.amount) || 0,
+      receivedAmount: Number(newEntryData.amount) || 0,
+      paidAmount: 0,
       location: (newEntryData.location || '').trim(),
       notes: (newEntryData.notes || '').trim(),
       crossed: !!newEntryData.crossed,
@@ -144,7 +159,11 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     });
 
     persistState(updatedList);
-    showToast('✔ تم حفظ التعديل');
+
+    // Keep selected statement modal in sync
+    if (selectedStatementEntry && selectedStatementEntry.id === id) {
+      setSelectedStatementEntry({ ...selectedStatementEntry, ...updatedFields });
+    }
 
     try {
       fetch(`/api/entries/${id}`, {
@@ -153,6 +172,13 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
         body: JSON.stringify(updatedFields),
       }).catch(() => {});
     } catch {}
+  };
+
+  // Save updated entry from Statement Modal
+  const handleSaveStatementEntry = (updatedEntry: LedgerEntry) => {
+    handleUpdateEntry(updatedEntry.id, updatedEntry);
+    setSelectedStatementEntry(updatedEntry);
+    showToast(`✔ تم تحديث كشف حساب: ${updatedEntry.name}`);
   };
 
   // Delete Handler - Permanently deletes and stays deleted on refresh
@@ -234,19 +260,15 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   // Smart Arabic Search Filter (normalizes hamzas, yaa/alif maqsura, taa marbuta, and matches all words)
   const filteredEntries = entries.filter((item) => {
     if (searchQuery.trim()) {
-      const targetText = `${item.name} ${item.location} ${item.notes}`;
+      const targetText = `${item.name} ${item.nickname || ''} ${item.location} ${item.notes}`;
       if (!matchesArabicSearch(targetText, searchQuery)) return false;
     }
 
-    if (statusFilter === 'pending') return !item.crossed;
-    if (statusFilter === 'crossed') return item.crossed;
+    const net = calculateNetBalance(item);
+    if (statusFilter === 'pending') return net.status !== 'khalis' && !item.crossed;
+    if (statusFilter === 'crossed') return net.status === 'khalis' || item.crossed;
     if (statusFilter === 'settlements') {
-      return (
-        item.notes.includes('كان عليه') ||
-        item.notes.includes('علينا') ||
-        item.location.includes('كان عليه') ||
-        item.location.includes('علينا')
-      );
+      return net.status === 'alina' || net.netAmount > 0;
     }
     return true;
   });
@@ -389,6 +411,10 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
                 entry={entry}
                 onUpdate={handleUpdateEntry}
                 onDelete={handleDeleteEntry}
+                onOpenStatement={(item) => {
+                  setSelectedStatementEntry(item);
+                  setIsStatementOpen(true);
+                }}
               />
             ))}
           </div>
@@ -414,6 +440,14 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
         isOpen={isManualModalOpen}
         onClose={() => setIsManualModalOpen(false)}
         onSubmit={handleAddNewEntry}
+      />
+
+      {/* Statement / Ledger Profile Modal */}
+      <StatementModal
+        entry={selectedStatementEntry}
+        isOpen={isStatementOpen}
+        onClose={() => setIsStatementOpen(false)}
+        onSaveEntry={handleSaveStatementEntry}
       />
 
       {/* Toast Notification */}
