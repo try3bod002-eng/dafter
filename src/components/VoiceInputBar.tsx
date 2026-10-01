@@ -74,14 +74,23 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
       } catch {}
 
       rec.onresult = (e: any) => {
-        let fullText = '';
+        let finalTranscript = '';
+        let interimTranscript = '';
+
         for (let i = 0; i < e.results.length; i++) {
-          fullText += e.results[i][0].transcript + ' ';
+          const res = e.results[i];
+          if (res.isFinal) {
+            finalTranscript += res[0].transcript + ' ';
+          } else {
+            // On mobile Chrome, non-final results accumulate in sequence, take the latest full hypothesis
+            interimTranscript = res[0].transcript;
+          }
         }
-        const trimmed = fullText.trim();
-        if (trimmed) {
-          transcriptRef.current = trimmed;
-          setLiveTranscript(trimmed);
+
+        const fullSentence = `${finalTranscript} ${interimTranscript}`.trim().replace(/\s+/g, ' ');
+        if (fullSentence) {
+          transcriptRef.current = fullSentence;
+          setLiveTranscript(fullSentence);
         }
       };
 

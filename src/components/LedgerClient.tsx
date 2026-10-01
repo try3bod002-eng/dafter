@@ -187,12 +187,20 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       setIsVoiceSearching(true);
 
       rec.onresult = (e: any) => {
-        let transcript = '';
+        let finalTranscript = '';
+        let interimTranscript = '';
+
         for (let i = 0; i < e.results.length; i++) {
-          transcript += e.results[i][0].transcript + ' ';
+          const res = e.results[i];
+          if (res.isFinal) {
+            finalTranscript += res[0].transcript + ' ';
+          } else {
+            interimTranscript = res[0].transcript;
+          }
         }
-        const cleaned = transcript
-          .trim()
+
+        const fullSentence = `${finalTranscript} ${interimTranscript}`.trim().replace(/\s+/g, ' ');
+        const cleaned = fullSentence
           .replace(/^(ابحث عن|دور على|هاتلي|هات|اسم)\s+/g, '')
           .trim();
 
