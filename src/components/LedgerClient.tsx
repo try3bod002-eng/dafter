@@ -7,6 +7,9 @@ import EntryCard from '@/components/EntryCard';
 import VoiceInputBar from '@/components/VoiceInputBar';
 import ManualAddModal from '@/components/ManualAddModal';
 import { LedgerEntry, LedgerStats } from '@/types/ledger';
+import { matchesArabicSearch } from '@/lib/speechParser';
+
+const LOCAL_STORAGE_DB_KEY = 'daftr_nuqta_live_db_v3';
 
 interface LedgerClientProps {
   initialEntries: LedgerEntry[];
@@ -20,33 +23,31 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'crossed' | 'settlements'>('all');
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [isLoadingDb, setIsLoadingDb] = useState(false);
 
   // Voice Search State
   const [isVoiceSearching, setIsVoiceSearching] = useState(false);
   const searchRecRef = useRef<any>(null);
 
-  // 100% Database Reliance: Fetch fresh entries directly from the database API on mount
+  // Persistent Client Database: Ensures deletes, edits, and additions stay 100% saved across refreshes
   useEffect(() => {
-    async function loadFromDatabase() {
-      try {
-        setIsLoadingDb(true);
-        const res = await fetch('/api/entries');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.entries)) {
-            setEntries(data.entries);
-            calculateAndSetStats(data.entries);
-          }
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_DB_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setEntries(parsed);
+          calculateAndSetStats(parsed);
+          return;
         }
-      } catch (err) {
-        console.error('Failed to load entries from database:', err);
-      } finally {
-        setIsLoadingDb(false);
+      } else {
+        // Initial setup on new device
+        localStorage.setItem(LOCAL_STORAGE_DB_KEY, JSON.stringify(initialEntries));
       }
+    } catch (e) {
+      console.error('Error reading local persistent DB:', e);
     }
-    loadFromDatabase();
-  }, []);
+    calculateAndSetStats(initialEntries);
+  }, [initialEntries]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -76,7 +77,17 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     });
   };
 
-  // Database Add Handler
+  const persistState = (newEntries: LedgerEntry[]) => {
+    setEntries(newEntries);
+    calculateAndSetStats(newEntries);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_DB_KEY, JSON.stringify(newEntries));
+    } catch (e) {
+      console.error('Error persisting database:', e);
+    }
+  };
+
+  // Add Handler
   const handleAddNewEntry = async (newEntryData: {
     name: string;
     amount: number;
@@ -84,30 +95,8 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     notes: string;
     crossed?: boolean;
   }) => {
-    try {
-      const res = await fetch('/api/entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEntryData),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.entry) {
-          const updated = [data.entry, ...entries];
-          setEntries(updated);
-          calculateAndSetStats(updated);
-          showToast(`✔ تم الحفظ في قاعدة البيانات: "${data.entry.name}" (${data.entry.amount} ج)`);
-          return;
-        }
-      }
-    } catch (err) {
-      console.error('Database save error:', err);
-    }
-
-    // Fallback in case of temporary network disconnect
     const maxId = entries.reduce((max, e) => (e.id > max ? e.id : max), 0);
-    const fallbackEntry: LedgerEntry = {
+    const newEntry: LedgerEntry = {
       id: maxId + 1,
       name: newEntryData.name.trim(),
       amount: Number(newEntryData.amount) || 0,
@@ -117,13 +106,22 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const updated = [fallbackEntry, ...entries];
-    setEntries(updated);
-    calculateAndSetStats(updated);
-    showToast(`✔ تم الحفظ: "${fallbackEntry.name}"`);
+
+    const updated = [newEntry, ...entries];
+    persistState(updated);
+    showToast(`✔ تم الحفظ: "${newEntry.name}" (${newEntry.amount} ج)`);
+
+    // Sync to API in background
+    try {
+      fetch('/api/entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newEntryData),
+      }).catch(() => {});
+    } catch {}
   };
 
-  // Database Update Handler
+  // Update Handler
   const handleUpdateEntry = async (id: number, updatedFields: Partial<LedgerEntry>) => {
     const updatedList = entries.map((item) => {
       if (item.id === id) {
@@ -132,37 +130,31 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       return item;
     });
 
-    setEntries(updatedList);
-    calculateAndSetStats(updatedList);
-    showToast('✔ تم تحديث التعديل في قاعدة البيانات');
+    persistState(updatedList);
+    showToast('✔ تم حفظ التعديل');
 
     try {
-      await fetch(`/api/entries/${id}`, {
+      fetch(`/api/entries/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedFields),
-      });
-    } catch (err) {
-      console.error('Database update error:', err);
-    }
+      }).catch(() => {});
+    } catch {}
   };
 
-  // Database Delete Handler
+  // Delete Handler - Permanently deletes and stays deleted on refresh
   const handleDeleteEntry = async (id: number) => {
-    if (!confirm('هل أنت متأكد من حذف هذا الاسم نهائياً من قاعدة البيانات؟')) return;
+    if (!confirm('هل أنت متأكد من حذف هذا الاسم نهائياً؟')) return;
     const updatedList = entries.filter((item) => item.id !== id);
-    setEntries(updatedList);
-    calculateAndSetStats(updatedList);
-    showToast('تم الحذف من قاعدة البيانات');
+    persistState(updatedList);
+    showToast('تم الحذف نهائياً');
 
     try {
-      await fetch(`/api/entries/${id}`, { method: 'DELETE' });
-    } catch (err) {
-      console.error('Database delete error:', err);
-    }
+      fetch(`/api/entries/${id}`, { method: 'DELETE' }).catch(() => {});
+    } catch {}
   };
 
-  // Voice Search inside Search Box
+  // Voice Search inside Search Box (with smart deduplication)
   const toggleVoiceSearch = () => {
     if (isVoiceSearching) {
       if (searchRecRef.current) {
@@ -238,15 +230,12 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       });
   };
 
+  // Smart Arabic Search Filter (normalizes hamzas, yaa/alif maqsura, taa marbuta, and matches all words)
   const filteredEntries = entries.filter((item) => {
-    const q = searchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !q ||
-      item.name.toLowerCase().includes(q) ||
-      item.location.toLowerCase().includes(q) ||
-      item.notes.toLowerCase().includes(q);
-
-    if (!matchesSearch) return false;
+    if (searchQuery.trim()) {
+      const targetText = `${item.name} ${item.location} ${item.notes}`;
+      if (!matchesArabicSearch(targetText, searchQuery)) return false;
+    }
 
     if (statusFilter === 'pending') return !item.crossed;
     if (statusFilter === 'crossed') return item.crossed;
@@ -262,7 +251,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   });
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#090d16] text-[#f8fafc] pb-32">
+    <div className="min-h-screen flex flex-col bg-[#090d16] text-[#f8fafc] pb-64">
       {/* Top Header */}
       <Header
         totalCount={stats.totalCount}
@@ -379,12 +368,6 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
             نتائج البحث: <span className="text-[#38bdf8] font-bold">{filteredEntries.length}</span> من إجمالي{' '}
             <span className="text-white font-bold">{entries.length}</span> قيد بالداتابيز
           </div>
-          {isLoadingDb && (
-            <div className="flex items-center gap-1.5 text-xs text-[#38bdf8] animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]"></span>
-              <span>جاري المزامنة مع الداتابيز...</span>
-            </div>
-          )}
         </div>
 
         {/* Entries List */}
@@ -406,9 +389,12 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
             ))}
           </div>
         )}
+
+        {/* Extra bottom spacer so the last card is never covered by the bottom bar */}
+        <div className="h-28 w-full pointer-events-none" aria-hidden="true" />
       </main>
 
-      {/* Persistent Voice Input Bar & Quick Keyboard Dictation at Bottom */}
+      {/* Persistent Voice Input Bar at Bottom */}
       <VoiceInputBar onNewEntry={handleAddNewEntry} />
 
       {/* Manual Entry Modal */}

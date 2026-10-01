@@ -23,7 +23,6 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isInAppBrowser, setIsInAppBrowser] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
-  const [quickInput, setQuickInput] = useState('');
 
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef('');
@@ -177,14 +176,6 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
     if (triggerMode === 'hold' && isRecordingRef.current) stopListening();
   };
 
-  const handleQuickSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickInput.trim()) return;
-    const parsed = parseSpokenSentence(quickInput.trim());
-    onNewEntry(parsed);
-    setQuickInput('');
-  };
-
   return (
     <>
       {/* In-App Browser Warning Banner */}
@@ -315,26 +306,6 @@ export default function VoiceInputBar({ onNewEntry }: VoiceInputBarProps) {
       {/* Bottom Sticky Action Area */}
       <div className="fixed inset-x-0 bottom-0 z-40 bg-[#090d16]/96 backdrop-blur-md border-t border-[#1f293d] p-3 sm:pb-4 shadow-2xl">
         <div className="max-w-md mx-auto flex flex-col items-center gap-2.5">
-          {/* Quick Speech / Text Input Form (Works with phone keyboard microphone!) */}
-          <form onSubmit={handleQuickSubmit} className="w-full flex items-center gap-1.5">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={quickInput}
-                onChange={(e) => setQuickInput(e.target.value)}
-                placeholder="💡 انطق بمايك الكيبورد أو اكتب (مثال: الاسم محمد 500)"
-                className="w-full bg-[#111827] text-white text-xs sm:text-sm rounded-xl px-3 py-2 border border-[#1f2e4a] focus:border-[#38bdf8] focus:outline-none placeholder-[#64748b]"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!quickInput.trim()}
-              className="bg-[#0284c7] hover:bg-[#0369a1] disabled:opacity-40 text-white font-black text-xs px-3.5 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap"
-            >
-              تسجيل ⚡
-            </button>
-          </form>
-
           {/* Mode Selector */}
           <div className="w-full flex items-center justify-between px-1">
             <div className="flex items-center gap-1 bg-[#111827] p-1 rounded-full border border-[#1f293d] text-xs font-bold">

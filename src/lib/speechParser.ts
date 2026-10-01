@@ -109,3 +109,31 @@ export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
     crossed,
   };
 }
+
+export function normalizeArabic(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/[\u064B-\u065F\u0670]/g, '') // Remove tashkeel / diacritics
+    .replace(/[أإآٱ]/g, 'ا') // Normalize alif variations
+    .replace(/ى/g, 'ي') // Normalize alif maqsura to yaa
+    .replace(/ة/g, 'ه') // Normalize taa marbuta to haa
+    .replace(/ـ/g, '') // Remove kashida / tatweel
+    .toLowerCase()
+    .trim();
+}
+
+export function matchesArabicSearch(target: string, query: string): boolean {
+  if (!query) return true;
+  if (!target) return false;
+
+  const normTarget = normalizeArabic(target);
+  const normQuery = normalizeArabic(query);
+
+  if (normTarget.includes(normQuery)) return true;
+
+  // Multi-word / token search: all search words must match anywhere in the target
+  const tokens = normQuery.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return true;
+
+  return tokens.every((token) => normTarget.includes(token));
+}

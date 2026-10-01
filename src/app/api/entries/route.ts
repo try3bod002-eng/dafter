@@ -1,19 +1,18 @@
 import { NextResponse } from 'next/server';
 import { getAllEntries, addEntry } from '@/lib/db';
+import { matchesArabicSearch } from '@/lib/speechParser';
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const query = (searchParams.get('q') || '').trim().toLowerCase();
+    const query = (searchParams.get('q') || '').trim();
     const status = searchParams.get('status') || 'all';
 
     let entries = getAllEntries();
 
     if (query) {
       entries = entries.filter(e =>
-        e.name.toLowerCase().includes(query) ||
-        e.location.toLowerCase().includes(query) ||
-        e.notes.toLowerCase().includes(query)
+        matchesArabicSearch(`${e.name} ${e.location} ${e.notes}`, query)
       );
     }
 
