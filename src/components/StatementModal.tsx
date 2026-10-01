@@ -59,8 +59,8 @@ export default function StatementModal({
     const totalPaid = updatedTxs.filter((t) => t.type === 'paid').reduce((s, t) => s + t.amount, 0);
     const totalRec = updatedTxs.filter((t) => t.type === 'received').reduce((s, t) => s + t.amount, 0);
 
-    // If fully paid or more
-    const isCrossed = totalPaid >= totalRec;
+    // Only mark crossed if net is balanced (0). If we overpaid, it is NOT crossed (he owes us).
+    const isCrossed = totalPaid === totalRec;
 
     const updatedEntry: LedgerEntry = {
       ...entry,

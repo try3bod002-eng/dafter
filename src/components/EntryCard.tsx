@@ -22,6 +22,8 @@ export default function EntryCard({
   const [offsetX, setOffsetX] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
   const startXRef = useRef<number | null>(null);
+  const startYRef = useRef<number | null>(null);
+  const isHorizontalDragRef = useRef(false);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     // Only initiate swipe if not clicking an interactive input or button
@@ -30,29 +32,59 @@ export default function EntryCard({
       return;
     }
     startXRef.current = e.clientX;
-    setIsSwiping(true);
+    startYRef.current = e.clientY;
+    isHorizontalDragRef.current = false;
+    setIsSwiping(false);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (startXRef.current === null) return;
-    const diff = e.clientX - startXRef.current;
-    // Limit maximum drag to -110px left and +110px right
-    const clamped = Math.max(-110, Math.min(110, diff));
-    setOffsetX(clamped);
+    if (startXRef.current === null || startYRef.current === null) return;
+
+    const dx = e.clientX - startXRef.current;
+    const dy = e.clientY - startYRef.current;
+
+    // Check if user is scrolling vertically
+    if (!isHorizontalDragRef.current) {
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) {
+        // Vertical page scroll — cancel horizontal swipe
+        startXRef.current = null;
+        startYRef.current = null;
+        setOffsetX(0);
+        return;
+      }
+      if (Math.abs(dx) > 10) {
+        isHorizontalDragRef.current = true;
+        setIsSwiping(true);
+        try {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {}
+      }
+    }
+
+    if (isHorizontalDragRef.current) {
+      // Clamp between -120px and +120px
+      const clamped = Math.max(-120, Math.min(120, dx));
+      setOffsetX(clamped);
+    }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent) => {
     if (startXRef.current === null) return;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
+
     const finalDiff = offsetX;
     startXRef.current = null;
+    startYRef.current = null;
+    isHorizontalDragRef.current = false;
     setIsSwiping(false);
 
-    // If swiped far to the left (negative in RTL or physical screen left < -60)
-    if (finalDiff < -60) {
-      // Trigger Statement / Settle
+    // If swiped far to the left (<= -50px)
+    if (finalDiff <= -50) {
       onOpenStatement(entry);
-    } else if (finalDiff > 60) {
-      // Swiped far to the right -> Open Statement
+    } else if (finalDiff >= 50) {
+      // Swiped far to the right (>= +50px)
       onOpenStatement(entry);
     }
 
@@ -75,37 +107,57 @@ export default function EntryCard({
   };
 
   return (
-    <div className="relative overflow-hidden rounded-2xl select-none touch-pan-y">
+    <div className="relative overflow-hidden rounded-2xl select-none touch-pan-y bg-[#090d16]">
       
       {/* ── Background Action Reveal Layers ── */}
-      {/* Left Reveal (Swipe Right): Blue "كشف الحساب" */}
-      <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-sky-600 to-sky-500 flex items-center justify-end px-5 text-white font-black text-xs gap-1.5">
-        <span>📑 كشف الحساب</span>
-        <span>👉</span>
+      {/* 1. Left Swipe Reveal (dragged to Left, opens on the Right): Green "رد الواجب" */}
+      <div
+        dir="ltr"
+        className={`absolute inset-y-0 right-0 w-full bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 flex items-center justify-end px-3.5 text-white font-black text-xs sm:text-sm transition-opacity ${
+          offsetX < -5 ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        <div className="flex items-center gap-1.5 bg-black/25 px-3 py-1.5 rounded-xl border border-white/25 shadow-md">
+          <span className="text-base">🤝</span>
+          <span className="whitespace-nowrap">رد الواجب</span>
+        </div>
       </div>
 
-      {/* Right Reveal (Swipe Left): Green "رد الواجب" */}
-      <div className="absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-emerald-600 to-teal-500 flex items-center justify-start px-5 text-white font-black text-xs gap-1.5">
-        <span>👈</span>
-        <span>🤝 رد الواجب</span>
+      {/* 2. Right Swipe Reveal (dragged to Right, opens on the Left): Blue "كشف الحساب" */}
+      <div
+        dir="ltr"
+        className={`absolute inset-y-0 left-0 w-full bg-gradient-to-r from-sky-600 via-blue-600 to-sky-700 flex items-center justify-start px-3.5 text-white font-black text-xs sm:text-sm transition-opacity ${
+          offsetX > 5 ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        <div className="flex items-center gap-1.5 bg-black/25 px-3 py-1.5 rounded-xl border border-white/25 shadow-md">
+          <span className="text-base">📑</span>
+          <span className="whitespace-nowrap">كشف الحساب</span>
+        </div>
       </div>
 
-      {/* ── Main Foreground Card ── */}
+      {/* ── Main Foreground Card (100% Solid Background, Zero Bleed-through) ── */}
       <div
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={() => { startXRef.current = null; setOffsetX(0); setIsSwiping(false); }}
+        onPointerCancel={() => {
+          startXRef.current = null;
+          startYRef.current = null;
+          isHorizontalDragRef.current = false;
+          setOffsetX(0);
+          setIsSwiping(false);
+        }}
         style={{
           transform: `translateX(${offsetX}px)`,
           transition: isSwiping ? 'none' : 'transform 0.25s cubic-bezier(0.2, 0.9, 0.4, 1)',
         }}
-        className={`relative z-10 border rounded-2xl p-3.5 sm:p-4 shadow-md transition-colors ${
+        className={`relative z-10 border rounded-2xl p-3.5 sm:p-4 shadow-lg transition-colors bg-[#111827] ${
           netInfo.status === 'khalis'
-            ? 'bg-[#0f172a] border-emerald-950/60 opacity-85'
+            ? 'border-emerald-950/80 hover:border-emerald-500/30'
             : netInfo.status === 'alina'
-            ? 'bg-[#111827] border-[#1f293d] hover:border-amber-500/40'
-            : 'bg-[#111827] border-[#1f293d] hover:border-[#38bdf8]/40'
+            ? 'border-[#1f293d] hover:border-amber-500/40'
+            : 'border-[#1f293d] hover:border-[#38bdf8]/40'
         }`}
       >
         {/* Upper Row: Seq, Name & Nickname + Net Balance Badge */}
@@ -122,9 +174,7 @@ export default function EntryCard({
                 contentEditable
                 suppressContentEditableWarning
                 onBlur={(e) => handleFieldBlur('name', e.currentTarget.innerText)}
-                className={`font-black text-base sm:text-lg outline-none rounded px-1 transition-colors focus:bg-[#090d16] truncate cursor-text ${
-                  netInfo.status === 'khalis' ? 'text-slate-300' : 'text-white'
-                }`}
+                className="font-black text-base sm:text-lg outline-none rounded px-1 transition-colors focus:bg-[#090d16] truncate cursor-text text-white"
               >
                 {entry.name}
               </span>
@@ -134,7 +184,7 @@ export default function EntryCard({
                 contentEditable
                 suppressContentEditableWarning
                 onBlur={(e) => handleFieldBlur('nickname', e.currentTarget.innerText)}
-                className="text-xs font-bold text-sky-400 bg-sky-950/40 border border-sky-500/30 px-2 py-0.5 rounded-md outline-none focus:bg-[#090d16] cursor-text shrink-0"
+                className="text-xs font-bold text-sky-400 bg-sky-950/50 border border-sky-500/30 px-2 py-0.5 rounded-md outline-none focus:bg-[#090d16] cursor-text shrink-0"
                 title="اللقب أو الشهرة (اضغط للتعديل)"
               >
                 {entry.nickname ? `(${entry.nickname})` : '+ لقب'}
@@ -147,7 +197,7 @@ export default function EntryCard({
             onClick={() => onOpenStatement(entry)}
             className={`px-3 py-1.5 rounded-xl text-xs font-black border shadow-sm shrink-0 cursor-pointer transition-transform active:scale-95 text-center ${
               netInfo.status === 'khalis'
-                ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/30 hover:bg-emerald-900/60'
+                ? 'bg-emerald-950/90 text-emerald-400 border-emerald-500/40 hover:bg-emerald-900/60'
                 : netInfo.status === 'alina'
                 ? 'bg-gradient-to-r from-amber-950/90 to-amber-900/80 text-amber-300 border-amber-500/40 hover:border-amber-400'
                 : 'bg-gradient-to-r from-sky-950/90 to-sky-900/80 text-sky-300 border-sky-500/40 hover:border-sky-400'
@@ -191,7 +241,7 @@ export default function EntryCard({
             <button
               type="button"
               onClick={() => onOpenStatement(entry)}
-              className="bg-white/5 hover:bg-white/10 text-sky-300 border border-sky-400/20 px-3 py-1 rounded-lg font-black text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="bg-white/5 hover:bg-white/10 text-sky-300 border border-sky-400/20 px-3 py-1.5 rounded-lg font-black text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <span>📑</span>
               <span>كشف الحساب</span>
@@ -201,7 +251,7 @@ export default function EntryCard({
             <button
               type="button"
               onClick={() => onOpenStatement(entry)}
-              className="bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-lg font-black text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="bg-emerald-950/50 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg font-black text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <span>🤝</span>
               <span>رد الواجب</span>

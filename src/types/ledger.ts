@@ -43,24 +43,7 @@ export function calculateNetBalance(entry: LedgerEntry): {
   netAmount: number;
   label: string;
 } {
-  // إذا كان مشطوباً صراحة
-  if (entry.crossed) {
-    return { status: 'khalis', netAmount: 0, label: 'خالص (تم الرد)' };
-  }
-
-  // فحص الملاحظات لو فيها "كان عليه" و "علينا"
-  const text = `${entry.location || ''} ${entry.notes || ''}`;
-  const alinaMatch = text.match(/علينا\s*(\d+)/);
-  const alinaVal = alinaMatch ? parseInt(alinaMatch[1], 10) : 0;
-
-  const kanelehMatch = text.match(/كان\s+عليه\s*(\d+)/);
-  const kanelehVal = kanelehMatch ? parseInt(kanelehMatch[1], 10) : 0;
-
-  // الحركات المسجلة
-  const received = entry.receivedAmount ?? entry.amount ?? 0;
-  const paid = entry.paidAmount ?? 0;
-
-  // لو في معاملات صريحة
+  // 1. لو في معاملات مسجلة صريحة، نعتمد على الحساب الرياضي الدقيق أولاً
   if (entry.transactions && entry.transactions.length > 0) {
     const totalRec = entry.transactions
       .filter((t) => t.type === 'received')
@@ -69,32 +52,50 @@ export function calculateNetBalance(entry: LedgerEntry): {
       .filter((t) => t.type === 'paid')
       .reduce((sum, t) => sum + t.amount, 0);
 
-    const net = totalRec - totalPaid;
-    if (net === 0) return { status: 'khalis', netAmount: 0, label: 'خالص' };
-    if (net > 0) return { status: 'alina', netAmount: net, label: `واجب علينا: ${net} ج` };
-    return { status: 'leina', netAmount: Math.abs(net), label: `باقي لينا: ${Math.abs(net)} ج` };
+    const diff = totalRec - totalPaid;
+    if (diff === 0) {
+      return { status: 'khalis', netAmount: 0, label: 'خالص ✓' };
+    }
+    if (diff > 0) {
+      // استلمنا منه أكتر مما دفعنا له = له في ذمتنا
+      return { status: 'alina', netAmount: diff, label: `واجب علينا: ${diff} ج` };
+    }
+    // دفعنا له أكتر مما استلمنا منه = هو اللي عليه فلوس لينا!
+    const remainingForUs = Math.abs(diff);
+    return { status: 'leina', netAmount: remainingForUs, label: `باقي لينا: ${remainingForUs} ج` };
   }
 
+  // 2. إذا كان مشطوباً يدوياً بدون حركات متضاربة
+  if (entry.crossed) {
+    return { status: 'khalis', netAmount: 0, label: 'خالص (مشطوب)' };
+  }
+
+  // 3. فحص الملاحظات لو فيها "كان عليه" و "علينا"
+  const text = `${entry.location || ''} ${entry.notes || ''}`;
+  const alinaMatch = text.match(/علينا\s*(\d+)/);
+  const alinaVal = alinaMatch ? parseInt(alinaMatch[1], 10) : 0;
+
+  const received = entry.receivedAmount ?? entry.amount ?? 0;
+  const paid = entry.paidAmount ?? 0;
+
   if (text.includes('خالص') && alinaVal === 0) {
-    return { status: 'khalis', netAmount: 0, label: 'خالص' };
+    return { status: 'khalis', netAmount: 0, label: 'خالص ✓' };
   }
 
   if (alinaVal > 0) {
-    const effectiveAlina = Math.max(0, alinaVal - paid);
-    if (effectiveAlina === 0) return { status: 'khalis', netAmount: 0, label: 'خالص (سُدّد)' };
-    return { status: 'alina', netAmount: effectiveAlina, label: `واجب علينا: ${effectiveAlina} ج` };
+    const effectiveAlina = alinaVal - paid;
+    if (effectiveAlina === 0) return { status: 'khalis', netAmount: 0, label: 'خالص ✓' };
+    if (effectiveAlina > 0) return { status: 'alina', netAmount: effectiveAlina, label: `واجب علينا: ${effectiveAlina} ج` };
+    return { status: 'leina', netAmount: Math.abs(effectiveAlina), label: `باقي لينا: ${Math.abs(effectiveAlina)} ج` };
   }
 
-  // لو كان شخص دفع لنا نقطة ومافيش حساب قديم:
-  // في العرف، أي نقطة مستلمة هي واجب مستقبلي علينا حتى يتم ردها!
-  const remainingObligation = Math.max(0, received - paid);
-  if (remainingObligation === 0) {
-    return { status: 'khalis', netAmount: 0, label: 'خالص' };
+  // 4. الحساب الطبيعي للنقطة المستلمة:
+  const balance = received - paid;
+  if (balance === 0) {
+    return { status: 'khalis', netAmount: 0, label: 'خالص ✓' };
   }
-
-  return {
-    status: 'alina',
-    netAmount: remainingObligation,
-    label: `واجب علينا: ${remainingObligation} ج`,
-  };
+  if (balance > 0) {
+    return { status: 'alina', netAmount: balance, label: `واجب علينا: ${balance} ج` };
+  }
+  return { status: 'leina', netAmount: Math.abs(balance), label: `باقي لينا: ${Math.abs(balance)} ج` };
 }
