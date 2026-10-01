@@ -396,7 +396,15 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       </main>
 
       {/* Persistent Voice Input Bar at Bottom */}
-      <VoiceInputBar onNewEntry={handleAddNewEntry} />
+      <VoiceInputBar
+        onNewEntry={handleAddNewEntry}
+        onVoiceSearch={(query) => {
+          setSearchQuery(query);
+          showToast(`🔍 جاري البحث عن: ${query}`);
+        }}
+        searchQuery={searchQuery}
+        onClearSearch={() => setSearchQuery('')}
+      />
 
       {/* Manual Entry Modal */}
       <ManualAddModal
