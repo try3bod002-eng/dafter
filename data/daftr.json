@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "id": 3,
+    "name": "عبد الرح",
+    "amount": 5000,
+    "location": "الجوهري",
+    "notes": "خالص",
+    "crossed": false,
+    "createdAt": "2026-10-01T14:26:44.147Z",
+    "updatedAt": "2026-10-01T14:26:44.147Z"
+  },
+  {
+    "id": 2,
+    "name": "احمد الجوهري",
+    "amount": 5000,
+    "location": "كفر ابو ناصر",
+    "notes": "خالص",
+    "crossed": false,
+    "createdAt": "2026-10-01T14:26:21.288Z",
+    "updatedAt": "2026-10-01T14:26:21.288Z"
+  },
+  {
+    "id": 1,
+    "name": "احمد الجوهري",
+    "amount": 200,
+    "location": "",
+    "notes": "",
+    "crossed": false,
+    "createdAt": "2026-10-01T14:26:01.565Z",
+    "updatedAt": "2026-10-01T14:26:01.565Z"
+  }
+]

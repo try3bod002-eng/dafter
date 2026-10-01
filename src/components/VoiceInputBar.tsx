@@ -18,512 +18,467 @@ const EXAMPLES = [
   'الاسم أحمد رجب المبلغ خمسمية الملاحظات خالص',
 ];
 
+// ─────────────────────────────────────────────────────────────
+// SVG Radial Fan Math
+// Convention: 0° = top (12 o'clock), clockwise
+// ─────────────────────────────────────────────────────────────
+function toCartesian(cx: number, cy: number, r: number, angleDeg: number) {
+  const rad = (angleDeg - 90) * (Math.PI / 180);
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function fanBlade(
+  cx: number, cy: number,
+  ir: number, or_: number,
+  a1: number, a2: number
+): string {
+  const span = a2 >= a1 ? a2 - a1 : a2 + 360 - a1;
+  const large = span > 180 ? 1 : 0;
+  const o1 = toCartesian(cx, cy, or_, a1);
+  const o2 = toCartesian(cx, cy, or_, a2);
+  const i2 = toCartesian(cx, cy, ir, a2);
+  const i1 = toCartesian(cx, cy, ir, a1);
+  return `M${o1.x.toFixed(2)} ${o1.y.toFixed(2)} A${or_} ${or_} 0 ${large} 1 ${o2.x.toFixed(2)} ${o2.y.toFixed(2)} L${i2.x.toFixed(2)} ${i2.y.toFixed(2)} A${ir} ${ir} 0 ${large} 0 ${i1.x.toFixed(2)} ${i1.y.toFixed(2)}Z`;
+}
+
+function midArc(cx: number, cy: number, r: number, a1: number, a2: number) {
+  const mid = a2 >= a1 ? (a1 + a2) / 2 : (a1 + a2 + 360) / 2;
+  return toCartesian(cx, cy, r, mid);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Layout constants
+// ─────────────────────────────────────────────────────────────
+const SVG_W = 240, SVG_H = 220;
+const CX = 120, CY = 182; // button center in SVG space
+const IR = 40;  // inner radius (just outside the button)
+const OR = 112; // outer radius (fan blade extent)
+const LR = 82;  // label radius (between IR and OR, offset toward outer)
+
+// Search blade: lower-left → upper-left arc (225° → 345°)
+const SA1 = 225, SA2 = 345;
+const SEARCH_PATH = fanBlade(CX, CY, IR, OR, SA1, SA2);
+const SEARCH_LABEL = midArc(CX, CY, LR, SA1, SA2); // mid at ~285° = NW
+
+// Record blade: upper-right arc (345° → 105°, wraps through 0°)
+const RA1 = 345, RA2 = 105;
+const RECORD_PATH = fanBlade(CX, CY, IR, OR, RA1, RA2);
+const RECORD_LABEL = midArc(CX, CY, LR, RA1, RA2); // mid at ~45° = NE
+
+// ─────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────
 export default function VoiceInputBar({
   onNewEntry,
   onVoiceSearch,
   searchQuery = '',
   onClearSearch,
 }: VoiceInputBarProps) {
-  // Voice engine state
   const [activeVoiceMode, setActiveVoiceMode] = useState<'record' | 'search' | null>(null);
-  const [liveTranscript, setLiveTranscript] = useState('');
-  const [exampleIdx, setExampleIdx] = useState(0);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isInAppBrowser, setIsInAppBrowser] = useState(false);
-  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [liveTranscript, setLiveTranscript]   = useState('');
+  const [exampleIdx, setExampleIdx]           = useState(0);
+  const [errorMessage, setErrorMessage]       = useState<string | null>(null);
+  const [isInAppBrowser, setIsInAppBrowser]   = useState(false);
+  const [showHelpModal, setShowHelpModal]      = useState(false);
 
-  // Liquid Slider State
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState(0); // in pixels (-100 to +100)
-  const [activeZone, setActiveZone] = useState<'search' | 'record' | null>(null);
+  // Fan menu
+  const [menuOpen, setMenuOpen]       = useState(false);
+  const [touchedZone, setTouchedZone] = useState<'search' | 'record' | null>(null);
 
-  const recognitionRef = useRef<any>(null);
-  const transcriptRef = useRef('');
+  const recognitionRef    = useRef<any>(null);
+  const transcriptRef     = useRef('');
   const activeVoiceModeRef = useRef<'record' | 'search' | null>(null);
-  const touchStartX = useRef<number | null>(null);
-  const activeZoneRef = useRef<'search' | 'record' | null>(null);
 
-  useEffect(() => {
-    activeVoiceModeRef.current = activeVoiceMode;
-  }, [activeVoiceMode]);
-
-  useEffect(() => {
-    activeZoneRef.current = activeZone;
-  }, [activeZone]);
+  useEffect(() => { activeVoiceModeRef.current = activeVoiceMode; }, [activeVoiceMode]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const ua = navigator.userAgent || '';
+      const ua  = navigator.userAgent || '';
       const inApp = /FBAN|FBAV|Instagram|WhatsApp|Line|Twitter|Snapchat|Telegram/i.test(ua);
       setIsInAppBrowser(inApp);
     }
   }, []);
 
-  const triggerHaptic = (ms = 20) => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(ms);
-      }
-    } catch {}
+  const haptic = (ms = 25) => {
+    try { navigator.vibrate?.(ms); } catch {}
   };
 
-  // Start speech recognition immediately
+  // ── Voice Engine ──────────────────────────────────────────
   const startVoiceEngine = useCallback((mode: 'record' | 'search') => {
     if (activeVoiceModeRef.current) return;
     setErrorMessage(null);
-    triggerHaptic(40);
+    setMenuOpen(false);
+    setTouchedZone(null);
+    haptic(40);
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setErrorMessage('متصفحك لا يدعم التعرف الصوتي المباشر. يرجى فتح الموقع في متصفح Google Chrome.');
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      setErrorMessage('متصفحك لا يدعم التعرف الصوتي. يرجى استخدام Google Chrome.');
       setShowHelpModal(true);
       return;
     }
 
     try {
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch {}
-      }
+      if (recognitionRef.current) { try { recognitionRef.current.abort(); } catch {} }
 
-      const rec = new SpeechRecognition();
+      const rec = new SR();
       rec.lang = 'ar-EG';
       rec.continuous = true;
       rec.interimResults = true;
 
       transcriptRef.current = '';
       setLiveTranscript('');
-      setExampleIdx((prev) => (prev + 1) % EXAMPLES.length);
+      setExampleIdx(p => (p + 1) % EXAMPLES.length);
       setActiveVoiceMode(mode);
 
       rec.onresult = (e: any) => {
-        const fullSentence = extractCleanTranscript(e.results);
-        if (fullSentence) {
-          transcriptRef.current = fullSentence;
-          setLiveTranscript(fullSentence);
-
-          // For search: perform real-time instant search as user speaks!
+        const full = extractCleanTranscript(e.results);
+        if (full) {
+          transcriptRef.current = full;
+          setLiveTranscript(full);
           if (mode === 'search' && onVoiceSearch) {
-            const cleaned = fullSentence
-              .replace(/^(ابحث عن|دور على|هاتلي|هات|اسم)\s+/g, '')
-              .trim();
-            if (cleaned) {
-              onVoiceSearch(cleaned);
-            }
+            const q = full.replace(/^(ابحث عن|دور على|هاتلي|هات|اسم)\s+/g, '').trim();
+            if (q) onVoiceSearch(q);
           }
         }
       };
 
       rec.onerror = (e: any) => {
-        console.warn('SpeechRecognition error:', e.error);
         if (e.error === 'not-allowed') {
-          setErrorMessage('تم رفض إذن المايك. يرجى السماح بالوصول للميكروفون من إعدادات المتصفح.');
+          setErrorMessage('تم رفض إذن المايك. يرجى السماح من إعدادات المتصفح.');
           setShowHelpModal(true);
-          stopVoiceEngine();
+          stopVoiceEngine(false);
         }
       };
 
       rec.onend = () => {
         if (activeVoiceModeRef.current) {
-          try {
-            rec.start();
-          } catch {
-            setActiveVoiceMode(null);
-          }
+          try { rec.start(); } catch { setActiveVoiceMode(null); }
         }
       };
 
       recognitionRef.current = rec;
       rec.start();
-    } catch (err: any) {
-      setErrorMessage('تعذر تشغيل الميكروفون. تأكد من إعطاء الصلاحية.');
+    } catch {
+      setErrorMessage('تعذر تشغيل الميكروفون. تأكد من الإذن.');
       setShowHelpModal(true);
     }
   }, [onVoiceSearch]);
 
   const stopVoiceEngine = useCallback((commit = true) => {
-    const currentMode = activeVoiceModeRef.current;
-    if (!currentMode) return;
+    const mode = activeVoiceModeRef.current;
+    if (!mode) return;
     setActiveVoiceMode(null);
-    triggerHaptic(30);
+    haptic(30);
+    try { recognitionRef.current?.stop(); } catch {}
 
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-    }
-
-    const finalRaw = transcriptRef.current;
-    if (commit && finalRaw) {
-      if (currentMode === 'record') {
-        const parsed = parseSpokenSentence(finalRaw);
-        onNewEntry(parsed);
-      } else if (currentMode === 'search' && onVoiceSearch) {
-        const cleaned = finalRaw
-          .replace(/^(ابحث عن|دور على|هاتلي|هات|اسم)\s+/g, '')
-          .trim();
-        onVoiceSearch(cleaned);
+    const raw = transcriptRef.current;
+    if (commit && raw) {
+      if (mode === 'record') {
+        onNewEntry(parseSpokenSentence(raw));
+      } else if (mode === 'search' && onVoiceSearch) {
+        const q = raw.replace(/^(ابحث عن|دور على|هاتلي|هات|اسم)\s+/g, '').trim();
+        onVoiceSearch(q);
       }
     }
-
     transcriptRef.current = '';
     setLiveTranscript('');
   }, [onNewEntry, onVoiceSearch]);
 
-  // Pointer / Touch Handlers for the Fluid Liquid Slider
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (activeVoiceMode) return;
-    touchStartX.current = e.clientX;
-    setIsDragging(true);
-    setDragOffset(0);
-    setActiveZone(null);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging || touchStartX.current === null) return;
-    const currentX = e.clientX;
-    const delta = currentX - touchStartX.current;
-
-    // Constrain slider movement within [-80px, +80px]
-    const clamped = Math.max(-80, Math.min(80, delta));
-    setDragOffset(clamped);
-
-    // In RTL layout or standard screen:
-    // delta < -30 => Left side (Search)
-    // delta > 30  => Right side (Record)
-    if (delta < -30) {
-      if (activeZoneRef.current !== 'search') {
-        setActiveZone('search');
-        triggerHaptic(20);
-      }
-    } else if (delta > 30) {
-      if (activeZoneRef.current !== 'record') {
-        setActiveZone('record');
-        triggerHaptic(20);
-      }
-    } else {
-      if (activeZoneRef.current !== null) {
-        setActiveZone(null);
-      }
-    }
-  };
-
-  const handlePointerUp = () => {
-    if (!isDragging) return;
-    setIsDragging(false);
-    touchStartX.current = null;
-
-    const chosenZone = activeZoneRef.current;
-    setDragOffset(0);
-    setActiveZone(null);
-
-    // Immediate action on gesture release!
-    if (chosenZone === 'search') {
-      startVoiceEngine('search');
-    } else if (chosenZone === 'record') {
-      startVoiceEngine('record');
-    }
-  };
-
+  // ── Render ────────────────────────────────────────────────
   return (
     <>
-      {/* In-App Browser Warning Banner */}
+      {/* ── In-App Browser Warning ── */}
       {isInAppBrowser && (
-        <div className="fixed top-2 inset-x-3 z-50 bg-[#f59e0b] text-[#1e1b4b] p-3 rounded-2xl shadow-2xl flex items-center justify-between text-xs sm:text-sm font-bold border border-amber-300">
+        <div className="fixed top-2 inset-x-3 z-50 bg-amber-400 text-[#1e1b4b] p-3 rounded-2xl shadow-xl flex items-center justify-between text-xs font-bold border border-amber-300">
           <div className="flex items-center gap-2">
-            <span className="text-lg">⚠️</span>
-            <span>أنت تفتح التطبيق داخل واتساب! لتشغيل المايك اضغط على (⫶) واختر &quot;فتح في Chrome&quot;.</span>
+            <span>⚠️</span>
+            <span>أنت داخل واتساب! اضغط (⫶) واختر &quot;فتح في Chrome&quot; لتشغيل المايك.</span>
           </div>
-          <button
-            onClick={() => setIsInAppBrowser(false)}
-            className="text-black/60 hover:text-black font-black text-base px-1"
-          >
-            ✕
-          </button>
+          <button onClick={() => setIsInAppBrowser(false)} className="font-black text-base px-1">✕</button>
         </div>
       )}
 
-      {/* Permission / Help Modal */}
+      {/* ── Help Modal ── */}
       {showHelpModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-[#0f172a] border-2 border-[#38bdf8] rounded-3xl max-w-lg w-full p-6 shadow-2xl text-white max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-[#1e293b] pb-3 mb-4">
-              <h3 className="text-lg font-black text-[#38bdf8] flex items-center gap-2">
-                <span>🎙️</span>
-                <span>تفعيل الميكروفون</span>
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] border-2 border-sky-400 rounded-3xl max-w-sm w-full p-6 text-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+              <h3 className="text-base font-black text-sky-400 flex items-center gap-2">
+                <span>🎙️</span><span>تفعيل الميكروفون</span>
               </h3>
-              <button
-                onClick={() => setShowHelpModal(false)}
-                className="text-gray-400 hover:text-white text-lg font-bold"
-              >
-                ✕
-              </button>
+              <button onClick={() => setShowHelpModal(false)} className="text-gray-400 hover:text-white">✕</button>
             </div>
-
             {errorMessage && (
-              <div className="bg-red-950/60 border border-red-500/50 text-red-200 p-3.5 rounded-2xl text-xs sm:text-sm mb-4 font-semibold">
-                ⚠️ {errorMessage}
-              </div>
+              <div className="bg-red-950/60 border border-red-500/40 text-red-200 p-3 rounded-xl text-xs mb-4">{errorMessage}</div>
             )}
-
-            <div className="space-y-3 text-xs sm:text-sm text-gray-300 leading-relaxed mb-6">
-              <p>💡 <strong>خطوات تفعيل المايك في متصفح Chrome:</strong></p>
-              <ol className="list-decimal list-inside space-y-1.5 text-gray-300 pr-1">
-                <li>اضغط على علامة القفل 🔒 أو أيقونة الموقع بجوار شريط العنوان بالأعلى.</li>
-                <li>اختر <strong>أذونات الموقع (Site settings / Permissions)</strong>.</li>
-                <li>تأكد من اختيار <strong>السماح (Allow)</strong> للميكروفون.</li>
-                <li>حدّث الصفحة وجرب مرة أخرى.</li>
-              </ol>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-2.5">
+            <ol className="list-decimal list-inside space-y-1.5 text-xs text-gray-300 mb-5">
+              <li>اضغط 🔒 بجوار شريط العنوان.</li>
+              <li>اختر <strong>أذونات الموقع</strong>.</li>
+              <li>اختر <strong>السماح (Allow)</strong> للميكروفون.</li>
+              <li>حدّث الصفحة وجرب مرة أخرى.</li>
+            </ol>
+            <div className="flex gap-2">
               <button
-                type="button"
-                onClick={() => {
-                  setShowHelpModal(false);
-                  startVoiceEngine('record');
-                }}
-                className="w-full sm:w-auto bg-[#38bdf8] text-[#090d16] font-black py-2.5 px-5 rounded-xl text-xs hover:bg-[#0284c7] cursor-pointer"
-              >
-                حاول مرة أخرى
-              </button>
+                onClick={() => { setShowHelpModal(false); startVoiceEngine('record'); }}
+                className="flex-1 bg-sky-400 text-[#090d16] font-black py-2.5 rounded-xl text-xs"
+              >حاول مرة أخرى</button>
               <button
-                type="button"
                 onClick={() => setShowHelpModal(false)}
-                className="w-full sm:w-auto bg-[#334155] text-white font-bold py-2.5 px-5 rounded-xl text-xs hover:bg-[#475569] cursor-pointer"
-              >
-                إغلاق
-              </button>
+                className="flex-1 bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs"
+              >إغلاق</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ACTIVE LISTENING LIQUID DYNAMIC ISLAND (EXPANDED) */}
+      {/* ── Active Listening Modal ── */}
       {activeVoiceMode && (
-        <div className="fixed inset-x-3 bottom-4 max-w-lg mx-auto z-50 pointer-events-auto animate-in slide-in-from-bottom-6 duration-200">
+        <div className="fixed inset-x-3 bottom-5 max-w-lg mx-auto z-50 animate-in slide-in-from-bottom-4 duration-200">
           <div
-            className={`relative rounded-3xl p-4 sm:p-5 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] border-2 transition-all ${
+            className={`rounded-3xl p-4 backdrop-blur-2xl border-2 shadow-2xl ${
               activeVoiceMode === 'search'
-                ? 'bg-[#06111f]/95 border-[#38bdf8] shadow-[#38bdf8]/20'
-                : 'bg-[#180808]/95 border-[#ef4444] shadow-[#ef4444]/25'
+                ? 'bg-[#06111f]/97 border-sky-400 shadow-sky-500/20'
+                : 'bg-[#180808]/97 border-red-500 shadow-red-500/20'
             }`}
           >
-            {/* Header with Liquid Pulsing Audio Waves */}
+            {/* Header */}
             <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2">
                 <span className="relative flex h-3 w-3">
-                  <span
-                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                      activeVoiceMode === 'search' ? 'bg-[#38bdf8]' : 'bg-[#ef4444]'
-                    }`}
-                  />
-                  <span
-                    className={`relative inline-flex rounded-full h-3 w-3 ${
-                      activeVoiceMode === 'search' ? 'bg-[#38bdf8]' : 'bg-[#ef4444]'
-                    }`}
-                  />
+                  <span className={`animate-ping absolute inset-0 rounded-full opacity-70 ${activeVoiceMode === 'search' ? 'bg-sky-400' : 'bg-red-500'}`} />
+                  <span className={`relative rounded-full h-3 w-3 ${activeVoiceMode === 'search' ? 'bg-sky-400' : 'bg-red-500'}`} />
                 </span>
-
-                <span
-                  className={`font-black text-sm tracking-wide ${
-                    activeVoiceMode === 'search' ? 'text-[#38bdf8]' : 'text-[#ef4444]'
-                  }`}
-                >
-                  {activeVoiceMode === 'search' ? '🔍 بيسمعك الآن للبحث في الدفتر...' : '🎙️ بيسمعك الآن لتسجيل القيد...'}
+                <span className={`text-sm font-black ${activeVoiceMode === 'search' ? 'text-sky-400' : 'text-red-400'}`}>
+                  {activeVoiceMode === 'search' ? '🔍 بيسمعك للبحث...' : '🎙️ بيسمعك للتسجيل...'}
                 </span>
-
-                {/* Animated Audio Waveform Equalizer */}
-                <div className="flex items-center gap-1 ml-2">
-                  <span className="w-1 h-3 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1 h-5 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  <span className="w-1 h-6 bg-current rounded-full animate-bounce" style={{ animationDelay: '75ms' }} />
-                  <span className="w-1 h-4 bg-current rounded-full animate-bounce" style={{ animationDelay: '220ms' }} />
+                <div className={`flex items-end gap-0.5 ${activeVoiceMode === 'search' ? 'text-sky-400' : 'text-red-400'}`}>
+                  {[3, 5, 2, 6, 4].map((h, i) => (
+                    <span key={i} className="w-0.5 rounded-full bg-current animate-bounce" style={{ height: `${h * 3}px`, animationDelay: `${i * 80}ms` }} />
+                  ))}
                 </div>
               </div>
-
-              {/* Action Buttons in listening mode */}
-              <div className="flex items-center gap-1.5">
+              <div className="flex gap-1.5">
                 <button
-                  type="button"
                   onClick={() => stopVoiceEngine(true)}
-                  className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer shadow-lg transition-transform active:scale-95 ${
-                    activeVoiceMode === 'search'
-                      ? 'bg-gradient-to-r from-[#0284c7] to-[#38bdf8] text-[#090d16]'
-                      : 'bg-gradient-to-r from-[#dc2626] to-[#ef4444] text-white'
-                  }`}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer ${activeVoiceMode === 'search' ? 'bg-gradient-to-r from-sky-600 to-sky-400 text-white' : 'bg-gradient-to-r from-red-700 to-red-500 text-white'}`}
                 >
-                  {activeVoiceMode === 'search' ? '✓ تم البحث' : '💾 حفظ القيد'}
+                  {activeVoiceMode === 'search' ? '✓ بحث' : '💾 حفظ'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => stopVoiceEngine(false)}
-                  className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white text-xs font-bold transition-all cursor-pointer"
-                  title="إلغاء بدون حفظ"
-                >
-                  ✕ إلغاء
-                </button>
+                <button onClick={() => stopVoiceEngine(false)} className="px-2.5 py-1.5 rounded-xl bg-white/5 text-gray-400 text-xs font-bold cursor-pointer hover:text-white">✕</button>
               </div>
             </div>
-
-            {/* Hint / Template pill */}
+            {/* Hint */}
             {activeVoiceMode === 'record' ? (
-              <div className="mb-3 space-y-1.5">
-                <div className="flex flex-wrap gap-1 text-[11px] font-black text-white">
-                  <span className="bg-white/10 px-2 py-0.5 rounded-md text-[#38bdf8]">الاسم [..]</span>
-                  <span className="bg-white/10 px-2 py-0.5 rounded-md text-[#38bdf8]">المبلغ [..]</span>
-                  <span className="bg-white/10 px-2 py-0.5 rounded-md text-[#38bdf8]">البلد [..]</span>
-                  <span className="bg-white/10 px-2 py-0.5 rounded-md text-[#38bdf8]">الملاحظات [..]</span>
-                </div>
-                <div className="text-[11px] text-amber-300/90 font-medium truncate">
-                  💡 مثال: &quot;{EXAMPLES[exampleIdx]}&quot;
-                </div>
+              <div className="mb-2.5 flex flex-wrap gap-1">
+                {['الاسم [..]', 'المبلغ [..]', 'البلد [..]', 'الملاحظات [..]'].map(t => (
+                  <span key={t} className="bg-white/10 text-sky-300 text-[11px] font-black px-2 py-0.5 rounded-md">{t}</span>
+                ))}
               </div>
             ) : (
-              <div className="mb-2.5 text-xs text-sky-200/80 font-medium">
-                💡 انطق اسم الشخص أو البلد أو العائلة (مثال: &quot;أشرف&quot; أو &quot;شربين&quot;)
-              </div>
+              <p className="text-xs text-sky-200/70 mb-2.5">💡 انطق الاسم أو البلد مثال: &quot;أشرف&quot; أو &quot;شربين&quot;</p>
             )}
-
-            {/* Live speech transcript monitor */}
-            <div className="bg-black/60 rounded-2xl p-3 min-h-[50px] flex items-center border border-white/10 shadow-inner">
-              {liveTranscript ? (
-                <span className="text-white font-black text-sm sm:text-base leading-relaxed tracking-wide">
-                  {liveTranscript}
-                </span>
-              ) : (
-                <span className="text-gray-500 text-xs sm:text-sm flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-current animate-pulse" />
-                  في انتظار صوتك... تكلم الآن وسيكتب مباشرة
-                </span>
-              )}
+            {/* Live transcript */}
+            <div className="bg-black/50 rounded-2xl p-3 min-h-[48px] flex items-center border border-white/10">
+              {liveTranscript
+                ? <span className="text-white font-black text-sm">{liveTranscript}</span>
+                : <span className="text-gray-500 text-xs flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-gray-500 animate-pulse" /> في انتظار صوتك...</span>
+              }
             </div>
           </div>
         </div>
       )}
 
-      {/* IDLE FLOATING LIQUID SLIDER HUB (AT BOTTOM CENTER) */}
+      {/* ── BACKDROP ── */}
+      {menuOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-[2px]"
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
+
+      {/* ── RADIAL FAN HUB ── */}
       {!activeVoiceMode && (
-        <div className="fixed inset-x-0 bottom-4 z-40 flex flex-col items-center pointer-events-none px-3">
-          {/* Active Search Chip Pill (Allows quick clearing) */}
+        <div className="fixed inset-x-0 bottom-0 z-40 flex justify-center items-end pointer-events-none">
+
+          {/* Active search pill */}
           {searchQuery && (
-            <div className="pointer-events-auto mb-2 flex items-center gap-2 bg-[#0284c7]/90 text-white text-xs font-black px-3.5 py-1.5 rounded-full shadow-lg border border-sky-400 backdrop-blur-md animate-in fade-in zoom-in-95 duration-150">
-              <span>🔍 تصفية بـ: &quot;{searchQuery}&quot;</span>
-              <button
-                type="button"
-                onClick={onClearSearch}
-                className="bg-black/20 hover:bg-black/40 rounded-full w-4 h-4 flex items-center justify-center text-[10px]"
-                title="إلغاء التصفية"
-              >
-                ✕
-              </button>
+            <div className="absolute bottom-[200px] pointer-events-auto flex items-center gap-2 bg-sky-600/90 text-white text-xs font-black px-3.5 py-1.5 rounded-full shadow-lg border border-sky-400 backdrop-blur-md">
+              <span>🔍 &quot;{searchQuery}&quot;</span>
+              <button onClick={onClearSearch} className="bg-black/20 hover:bg-black/40 rounded-full w-4 h-4 flex items-center justify-center text-[10px]">✕</button>
             </div>
           )}
 
-          {/* Liquid Glass Container */}
-          <div className="pointer-events-auto relative select-none">
-            {/* Liquid Background Pill Dock */}
-            <div
-              className={`relative flex items-center h-16 rounded-full px-2 backdrop-blur-2xl transition-all duration-300 shadow-[0_15px_45px_rgba(0,0,0,0.85)] border ${
-                activeZone === 'search'
-                  ? 'bg-gradient-to-r from-[#0284c7]/30 via-[#0d1829]/95 to-[#0d1829]/95 border-[#38bdf8] shadow-[#38bdf8]/30 scale-[1.03]'
-                  : activeZone === 'record'
-                  ? 'bg-gradient-to-r from-[#0d1829]/95 via-[#0d1829]/95 to-[#ef4444]/30 border-[#ef4444] shadow-[#ef4444]/30 scale-[1.03]'
-                  : 'bg-[#0b1120]/90 border-white/10 hover:border-white/20'
-              }`}
-              style={{ width: '310px' }}
+          <div className="pointer-events-auto relative" style={{ width: SVG_W, height: SVG_H }}>
+
+            {/* ───── SVG FAN ───── */}
+            <svg
+              width={SVG_W}
+              height={SVG_H}
+              viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                overflow: 'visible',
+                transformOrigin: `${CX}px ${CY}px`,
+                transform: menuOpen ? 'scale(1)' : 'scale(0)',
+                transition: 'transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1)',
+              }}
             >
-              {/* LEFT HALF: Instant Voice Search (Direct Tap OR Slide Left) */}
-              <button
-                type="button"
-                onClick={() => startVoiceEngine('search')}
-                className={`flex-1 flex items-center justify-start pl-3 gap-2 h-full rounded-l-full cursor-pointer transition-all duration-200 ${
-                  activeZone === 'search' ? 'scale-105 text-[#38bdf8]' : 'text-gray-300 hover:text-white'
-                }`}
-                title="اضغط للبحث الصوتي فوراً"
-              >
-                <div
-                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
-                    activeZone === 'search'
-                      ? 'bg-[#38bdf8] text-[#090d16] shadow-lg shadow-[#38bdf8]/50 scale-110'
-                      : 'bg-white/5 text-[#38bdf8]'
-                  }`}
-                >
-                  <span className="text-base">🔍</span>
-                </div>
-                <div className="flex flex-col text-right">
-                  <span className="text-xs font-black tracking-tight">بحث صوتي</span>
-                  <span className="text-[9px] text-gray-500 font-bold">👈 اسحب يسار</span>
-                </div>
-              </button>
+              {/* ── SEARCH BLADE (upper-left) ── */}
+              <path
+                d={SEARCH_PATH}
+                fill={touchedZone === 'search' ? '#0284c7' : '#0c2a45'}
+                stroke={touchedZone === 'search' ? '#38bdf8' : '#0e3d66'}
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+                style={{
+                  cursor: 'pointer',
+                  transition: 'fill 0.12s, filter 0.12s',
+                  filter: touchedZone === 'search'
+                    ? 'drop-shadow(0 0 14px rgba(56,189,248,0.6))'
+                    : 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))',
+                }}
+                onPointerDown={() => { haptic(15); setTouchedZone('search'); }}
+                onPointerUp={() => { startVoiceEngine('search'); }}
+                onPointerLeave={() => setTouchedZone(null)}
+              />
 
-              {/* CENTER LIQUID SLIDER ORB (Drag Left to Search, Drag Right to Record) */}
-              <div
-                className="relative z-10 flex items-center justify-center w-14 h-14"
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
+              {/* Search icon + label */}
+              <g
+                transform={`translate(${SEARCH_LABEL.x.toFixed(1)} ${SEARCH_LABEL.y.toFixed(1)})`}
+                style={{ pointerEvents: 'none' }}
               >
-                {/* Glowing Liquid Orb */}
-                <div
-                  className={`w-12 h-12 rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing transition-transform duration-75 select-none shadow-2xl border-2 ${
-                    activeZone === 'search'
-                      ? 'bg-gradient-to-tr from-[#0284c7] to-[#38bdf8] border-white text-white shadow-[#38bdf8]/60 scale-110'
-                      : activeZone === 'record'
-                      ? 'bg-gradient-to-tr from-[#dc2626] to-[#ef4444] border-white text-white shadow-[#ef4444]/60 scale-110'
-                      : 'bg-gradient-to-b from-[#1e293b] to-[#0f172a] border-[#38bdf8]/60 text-white shadow-black/80 hover:border-[#38bdf8]'
-                  }`}
-                  style={{
-                    transform: `translateX(${dragOffset}px) scale(${isDragging ? 1.15 : 1})`,
-                    transition: isDragging ? 'transform 0.05s ease-out' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                  }}
+                {/* Magnifier icon */}
+                <circle cx="0" cy="-12" r="8" fill="none" stroke={touchedZone === 'search' ? 'white' : '#7dd3fc'} strokeWidth="2.5" />
+                <line x1="6" y1="-6" x2="11" y2="-1" stroke={touchedZone === 'search' ? 'white' : '#7dd3fc'} strokeWidth="2.5" strokeLinecap="round" />
+                {/* Label */}
+                <text
+                  textAnchor="middle"
+                  y="5"
+                  fill={touchedZone === 'search' ? 'white' : '#93c5fd'}
+                  fontSize="10"
+                  fontWeight="800"
+                  fontFamily="Cairo, Arial, sans-serif"
                 >
-                  {activeZone === 'search' ? (
-                    <span className="text-xl animate-pulse">🔍</span>
-                  ) : activeZone === 'record' ? (
-                    <span className="text-xl animate-pulse">🎙️</span>
-                  ) : (
-                    <span className="text-xl">⚡</span>
-                  )}
-                </div>
-              </div>
+                  بحث صوتي
+                </text>
+              </g>
 
-              {/* RIGHT HALF: Instant Voice Record (Direct Tap OR Slide Right) */}
-              <button
-                type="button"
-                onClick={() => startVoiceEngine('record')}
-                className={`flex-1 flex items-center justify-end pr-3 gap-2 h-full rounded-r-full cursor-pointer transition-all duration-200 ${
-                  activeZone === 'record' ? 'scale-105 text-[#ef4444]' : 'text-gray-300 hover:text-white'
-                }`}
-                title="اضغط لتسجيل قيد بالصوت فوراً"
+              {/* ── RECORD BLADE (upper-right) ── */}
+              <path
+                d={RECORD_PATH}
+                fill={touchedZone === 'record' ? '#dc2626' : '#2d0808'}
+                stroke={touchedZone === 'record' ? '#f87171' : '#4a1010'}
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+                style={{
+                  cursor: 'pointer',
+                  transition: 'fill 0.12s, filter 0.12s',
+                  filter: touchedZone === 'record'
+                    ? 'drop-shadow(0 0 14px rgba(239,68,68,0.6))'
+                    : 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))',
+                }}
+                onPointerDown={() => { haptic(15); setTouchedZone('record'); }}
+                onPointerUp={() => { startVoiceEngine('record'); }}
+                onPointerLeave={() => setTouchedZone(null)}
+              />
+
+              {/* Mic icon + label */}
+              <g
+                transform={`translate(${RECORD_LABEL.x.toFixed(1)} ${RECORD_LABEL.y.toFixed(1)})`}
+                style={{ pointerEvents: 'none' }}
               >
-                <div className="flex flex-col text-left">
-                  <span className="text-xs font-black tracking-tight">تسجيل قيد</span>
-                  <span className="text-[9px] text-gray-500 font-bold">اسحب يمين 👉</span>
-                </div>
-                <div
-                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
-                    activeZone === 'record'
-                      ? 'bg-[#ef4444] text-white shadow-lg shadow-[#ef4444]/50 scale-110'
-                      : 'bg-white/5 text-[#ef4444]'
-                  }`}
+                {/* Mic body */}
+                <rect x="-5" y="-21" width="10" height="14" rx="5" fill="none" stroke={touchedZone === 'record' ? 'white' : '#fca5a5'} strokeWidth="2.3" />
+                {/* Mic stand arc */}
+                <path d="M -9 -11 Q -9 0 0 0 Q 9 0 9 -11" fill="none" stroke={touchedZone === 'record' ? 'white' : '#fca5a5'} strokeWidth="2.3" strokeLinecap="round" />
+                {/* Mic stem */}
+                <line x1="0" y1="0" x2="0" y2="5" stroke={touchedZone === 'record' ? 'white' : '#fca5a5'} strokeWidth="2.3" strokeLinecap="round" />
+                {/* Red dot */}
+                <circle cx="7" cy="-18" r="3" fill="#ef4444" stroke={touchedZone === 'record' ? 'white' : '#4a1010'} strokeWidth="1" />
+                {/* Label */}
+                <text
+                  textAnchor="middle"
+                  y="18"
+                  fill={touchedZone === 'record' ? 'white' : '#fca5a5'}
+                  fontSize="10"
+                  fontWeight="800"
+                  fontFamily="Cairo, Arial, sans-serif"
                 >
-                  <span className="text-base">🎙️</span>
-                </div>
-              </button>
-            </div>
+                  تسجيل جديد
+                </text>
+              </g>
 
-            {/* Subtle Liquid Glow Reflection Under Dock */}
-            <div
-              className={`absolute -inset-1 rounded-full blur-xl -z-10 transition-opacity duration-300 ${
-                activeZone === 'search'
-                  ? 'bg-[#38bdf8]/30 opacity-100'
-                  : activeZone === 'record'
-                  ? 'bg-[#ef4444]/30 opacity-100'
-                  : 'bg-transparent opacity-0'
+              {/* Blade gap dividers */}
+              {[SA1, SA2, RA2].map((a, i) => {
+                const ip = toCartesian(CX, CY, IR + 3, a);
+                const op = toCartesian(CX, CY, OR - 4, a);
+                return (
+                  <line key={i} x1={ip.x} y1={ip.y} x2={op.x} y2={op.y}
+                    stroke="rgba(0,0,0,0.45)" strokeWidth="2.5" strokeLinecap="round"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                );
+              })}
+            </svg>
+
+            {/* ───── CENTER BUTTON ───── */}
+            <button
+              type="button"
+              onClick={() => {
+                if (menuOpen) {
+                  setMenuOpen(false);
+                  setTouchedZone(null);
+                } else {
+                  haptic(25);
+                  setTouchedZone(null);
+                  setMenuOpen(true);
+                }
+              }}
+              style={{
+                position: 'absolute',
+                left: CX - 30,
+                top: CY - 30,
+                width: 60,
+                height: 60,
+                borderRadius: '50%',
+                transition: 'background 0.2s, transform 0.15s',
+                transform: menuOpen ? 'scale(0.88)' : 'scale(1)',
+              }}
+              className={`flex items-center justify-center cursor-pointer select-none border-2 shadow-2xl ${
+                menuOpen
+                  ? 'bg-[#1e293b] border-white/30 shadow-white/10'
+                  : 'bg-gradient-to-tr from-[#1d4ed8] via-[#2563eb] to-[#0ea5e9] border-white/20 shadow-blue-500/60'
               }`}
-            />
+              aria-label={menuOpen ? 'إغلاق القائمة' : 'فتح قائمة الصوت'}
+            >
+              {menuOpen ? (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round">
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                </svg>
+              ) : (
+                <>
+                  {/* Bullseye */}
+                  <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
+                    <div className="w-3.5 h-3.5 rounded-full bg-white shadow-sm" />
+                  </div>
+                  {/* Outer pulse rings */}
+                  <span className="absolute w-[78px] h-[78px] rounded-full border-2 border-sky-400/25 animate-pulse pointer-events-none" />
+                  <span className="absolute w-[96px] h-[96px] rounded-full border border-sky-400/12 animate-pulse pointer-events-none" style={{ animationDelay: '0.6s' }} />
+                </>
+              )}
+            </button>
+
+            {/* ── Hint label ── */}
+            <div
+              style={{ position: 'absolute', left: CX, top: CY + 36, transform: 'translateX(-50%)' }}
+              className="text-[9px] text-gray-500 font-bold whitespace-nowrap pointer-events-none"
+            >
+              {menuOpen ? 'اضغط لإغلاق • اختر وضع الصوت' : 'اضغط للقائمة الصوتية'}
+            </div>
           </div>
         </div>
       )}

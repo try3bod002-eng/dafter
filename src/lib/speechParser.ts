@@ -46,10 +46,15 @@ export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
   let location = '';
   let notes = '';
 
-  const hasTags = /(الاسم|اسم|المبلغ|مبلغ|البلد|بلد|من|الملاحظات|ملاحظات|الملاحظة|ملاحظة)/i.test(raw);
+  // NOTE: 'من' intentionally removed from keywords — it appears inside common Arabic names
+  // like الرحمن، عثمان، سليمان، رمضان and causes incorrect mid-name splits.
+  // Use explicit word-boundary matching (space before/after) to avoid false positives.
+  const KEY_RE = /((?:^|\s)(الاسم|اسم|المبلغ|مبلغ|البلد|بلد|الملاحظات|ملاحظات|الملاحظة|ملاحظة)(?=\s|$))/;
+  const hasTags = KEY_RE.test(raw);
 
   if (hasTags) {
-    const tokens = raw.split(/(الاسم|اسم|المبلغ|مبلغ|البلد|بلد|من|الملاحظات|ملاحظات|الملاحظة|ملاحظة)/);
+    // Split on standalone keywords (preceded and followed by space or boundary)
+    const tokens = raw.split(/((?:^|(?<=\s))(الاسم|اسم|المبلغ|مبلغ|البلد|بلد|الملاحظات|ملاحظات|الملاحظة|ملاحظة)(?=\s|$))/);
     let cur = '';
 
     for (let i = 0; i < tokens.length; i++) {
@@ -58,7 +63,7 @@ export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
 
       if (['الاسم', 'اسم'].includes(t)) cur = 'name';
       else if (['المبلغ', 'مبلغ'].includes(t)) cur = 'amount';
-      else if (['البلد', 'بلد', 'من'].includes(t)) cur = 'location';
+      else if (['البلد', 'بلد'].includes(t)) cur = 'location'; // 'من' removed — too common in Arabic names
       else if (['الملاحظات', 'ملاحظات', 'الملاحظة', 'ملاحظة'].includes(t)) cur = 'notes';
       else {
         if (cur === 'name' && !name) name = t;
