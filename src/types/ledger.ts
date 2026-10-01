@@ -34,13 +34,14 @@ export interface LedgerEntry {
 
 export interface LedgerStats {
   totalCount: number;
-  totalAmount: number; // إجمالي النقطة المستلمة (لينا)
+  totalAmount: number; // إجمالي الفلوس اللي جاتلنا (المستلمة)
+  totalPaidAmount?: number; // إجمالي الفلوس اللي دفعناها (رد الواجب)
   crossedCount: number; // مسدد / خالص
   activeCount: number; // نشط
   settlementsCount: number; // عدد الحسابات اللي فيها مديونية
   totalCrossedAmount: number;
-  totalAlinaAmount: number; // إجمالي الواجب اللي في رقبتنا للناس
-  totalLeinaAmount?: number; // إجمالي المتبقي لينا عند الناس
+  totalAlinaAmount: number; // إجمالي الواجب اللي في رقبتنا للناس (اللي علينا)
+  totalLeinaAmount?: number; // إجمالي المتبقي لينا عند الناس (اللي لينا)
 }
 
 /**

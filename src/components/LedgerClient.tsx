@@ -97,11 +97,20 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
 
     let crossedCount = 0;
     let totalCrossedAmount = 0;
+    let totalPaidAmount = 0;
     let totalAlinaAmount = 0;
     let totalLeinaAmount = 0;
     let settlementsCount = 0;
 
     currentEntries.forEach((e) => {
+      let paid = Number(e.paidAmount) || 0;
+      if (e.transactions && e.transactions.length > 0) {
+        paid = e.transactions
+          .filter((t) => t.type === 'paid')
+          .reduce((sum, t) => sum + t.amount, 0);
+      }
+      totalPaidAmount += paid;
+
       const net = calculateNetBalance(e);
       if (net.status === 'khalis' || e.crossed) {
         crossedCount++;
@@ -119,6 +128,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     setStats({
       totalCount,
       totalAmount,
+      totalPaidAmount,
       crossedCount,
       activeCount,
       settlementsCount,
