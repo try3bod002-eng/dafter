@@ -1,9 +1,18 @@
+export interface OccasionItem {
+  id: string;
+  name: string; // مثل: فرح أحمد، سبوع ندى، عملية الوالد
+  date?: string;
+  notes?: string;
+  createdAt?: string;
+}
+
 export interface LedgerTransaction {
   id: string;
   date: string;
   type: 'received' | 'paid'; // 'received' = نقطة استلمناها منه في مناسبتنا, 'paid' = واجب رديناه له في مناسبته
   amount: number;
   title: string;
+  occasion?: string; // المناسبة المرتبطة بهذه الحركة (مثل فرح أحمد)
   notes?: string;
 }
 
@@ -11,6 +20,7 @@ export interface LedgerEntry {
   id: number;
   name: string;
   nickname?: string; // اللقب أو الشهرة (مثل: أبو طارق، المعلم)
+  occasion?: string; // المناسبة الأساسية المسجل فيها (مثل فرح أحمد)
   amount: number; // المبلغ الأساسي المسجل
   receivedAmount?: number; // إجمالي المستلم منه
   paidAmount?: number; // إجمالي المدفوع له (رد الواجب)

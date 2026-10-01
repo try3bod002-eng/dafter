@@ -5,21 +5,32 @@ import React, { useState } from 'react';
 interface ManualAddModalProps {
   isOpen: boolean;
   onClose: () => void;
+  occasions?: { id: string; name: string }[];
+  defaultOccasion?: string;
   onSubmit: (data: {
     name: string;
     nickname?: string;
+    occasion?: string;
     amount: number;
     location: string;
     notes: string;
   }) => void;
 }
 
-export default function ManualAddModal({ isOpen, onClose, onSubmit }: ManualAddModalProps) {
+export default function ManualAddModal({
+  isOpen,
+  onClose,
+  occasions = [],
+  defaultOccasion,
+  onSubmit,
+}: ManualAddModalProps) {
   const [name, setName] = useState('');
   const [nickname, setNickname] = useState('');
   const [amount, setAmount] = useState<string>('200');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
+  const [occasion, setOccasion] = useState(defaultOccasion || (occasions[0]?.name ?? 'عام'));
+  const [customOccasion, setCustomOccasion] = useState('');
 
   if (!isOpen) return null;
 
@@ -29,9 +40,11 @@ export default function ManualAddModal({ isOpen, onClose, onSubmit }: ManualAddM
       alert('يرجى كتابة اسم الشخص أولاً');
       return;
     }
+    const finalOccasion = occasion === '__custom__' ? customOccasion.trim() : occasion;
     onSubmit({
       name: name.trim(),
       nickname: nickname.trim() || undefined,
+      occasion: finalOccasion || undefined,
       amount: parseFloat(amount) || 0,
       location: location.trim(),
       notes: notes.trim(),
@@ -41,6 +54,7 @@ export default function ManualAddModal({ isOpen, onClose, onSubmit }: ManualAddM
     setAmount('200');
     setLocation('');
     setNotes('');
+    setCustomOccasion('');
     onClose();
   };
 
@@ -113,6 +127,42 @@ export default function ManualAddModal({ isOpen, onClose, onSubmit }: ManualAddM
                 className="w-full bg-[#111827] border border-[#1f293d] rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white outline-none focus:border-sky-400 transition-all placeholder:text-slate-600"
               />
             </div>
+          </div>
+
+          {/* Occasion / Collection Selector */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1">
+              المناسبة / الكوليكشن (الدفتر)
+            </label>
+            <div className="flex gap-2">
+              <select
+                value={occasion}
+                onChange={(e) => setOccasion(e.target.value)}
+                className="flex-1 bg-[#111827] border border-[#1f293d] rounded-xl px-3.5 py-2.5 text-sm font-bold text-sky-300 outline-none focus:border-sky-400 transition-all cursor-pointer"
+              >
+                {occasions.map((occ) => (
+                  <option key={occ.id} value={occ.name} className="bg-[#111827] text-white">
+                    🎉 {occ.name}
+                  </option>
+                ))}
+                <option value="__custom__" className="bg-[#111827] text-amber-300">
+                  ➕ مناسبة جديدة أخرى...
+                </option>
+              </select>
+            </div>
+
+            {/* If user picked custom occasion */}
+            {occasion === '__custom__' && (
+              <input
+                type="text"
+                required
+                value={customOccasion}
+                onChange={(e) => setCustomOccasion(e.target.value)}
+                placeholder="اكتب اسم المناسبة الجديدة (مثال: فرح أحمد، سبوع نور...)"
+                autoFocus
+                className="mt-2 w-full bg-[#111827] border border-amber-500/40 rounded-xl px-3.5 py-2 text-xs font-bold text-amber-300 outline-none focus:border-amber-400 placeholder:text-slate-600"
+              />
+            )}
           </div>
 
           <div>

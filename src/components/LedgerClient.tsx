@@ -7,10 +7,18 @@ import EntryCard from '@/components/EntryCard';
 import VoiceInputBar from '@/components/VoiceInputBar';
 import ManualAddModal from '@/components/ManualAddModal';
 import StatementModal from '@/components/StatementModal';
-import { LedgerEntry, LedgerStats, calculateNetBalance } from '@/types/ledger';
+import { LedgerEntry, LedgerStats, OccasionItem, calculateNetBalance } from '@/types/ledger';
 import { matchesArabicSearch, extractCleanTranscript } from '@/lib/speechParser';
+import SidebarDrawer from '@/components/SidebarDrawer';
+import OccasionChipsBar from '@/components/OccasionChipsBar';
 
 const LOCAL_STORAGE_DB_KEY = 'daftr_nuqta_live_db_v5';
+const LOCAL_STORAGE_OCCASIONS_KEY = 'daftr_occasions_v1';
+
+const DEFAULT_OCCASIONS: OccasionItem[] = [
+  { id: '1', name: 'فرح أحمد', createdAt: new Date().toISOString() },
+  { id: '2', name: 'سبوع مريم', createdAt: new Date().toISOString() },
+];
 
 interface LedgerClientProps {
   initialEntries: LedgerEntry[];
@@ -24,6 +32,13 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'crossed' | 'settlements'>('all');
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Drawer / Navigation Bar (3 bars) State
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  // Occasions / Collections State
+  const [occasions, setOccasions] = useState<OccasionItem[]>(DEFAULT_OCCASIONS);
+  const [selectedOccasion, setSelectedOccasion] = useState<string>('all');
 
   // Statement / Ledger Profile Modal State
   const [selectedStatementEntry, setSelectedStatementEntry] = useState<LedgerEntry | null>(null);
@@ -45,11 +60,20 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
         if (Array.isArray(parsed)) {
           setEntries(parsed);
           calculateAndSetStats(parsed);
-          return;
         }
       } else {
-        // Initial setup on new device
         localStorage.setItem(LOCAL_STORAGE_DB_KEY, JSON.stringify(initialEntries));
+      }
+
+      // Load saved occasions
+      const savedOccs = localStorage.getItem(LOCAL_STORAGE_OCCASIONS_KEY);
+      if (savedOccs) {
+        const parsedOccs = JSON.parse(savedOccs);
+        if (Array.isArray(parsedOccs) && parsedOccs.length > 0) {
+          setOccasions(parsedOccs);
+        }
+      } else {
+        localStorage.setItem(LOCAL_STORAGE_OCCASIONS_KEY, JSON.stringify(DEFAULT_OCCASIONS));
       }
     } catch (e) {
       console.error('Error reading local persistent DB:', e);
@@ -118,6 +142,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   const handleAddNewEntry = async (newEntryData: {
     name: string;
     nickname?: string;
+    occasion?: string;
     amount: number;
     location: string;
     notes: string;
@@ -128,6 +153,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       id: maxId + 1,
       name: newEntryData.name.trim(),
       nickname: newEntryData.nickname?.trim() || undefined,
+      occasion: newEntryData.occasion || (selectedOccasion !== 'all' ? selectedOccasion : undefined),
       amount: Number(newEntryData.amount) || 0,
       receivedAmount: Number(newEntryData.amount) || 0,
       paidAmount: 0,
@@ -150,6 +176,38 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
         body: JSON.stringify(newEntryData),
       }).catch(() => {});
     } catch {}
+  };
+
+  const handleAddOccasion = (name: string) => {
+    const newOcc: OccasionItem = {
+      id: Date.now().toString(),
+      name: name.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [...occasions, newOcc];
+    setOccasions(updated);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_OCCASIONS_KEY, JSON.stringify(updated));
+    } catch {}
+    setSelectedOccasion(newOcc.name);
+    showToast(`🎉 تم إضافة مناسبة جديدة: "${newOcc.name}"`);
+  };
+
+  const handleDeleteOccasion = (id: string) => {
+    const updated = occasions.filter((o) => o.id !== id);
+    setOccasions(updated);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_OCCASIONS_KEY, JSON.stringify(updated));
+    } catch {}
+    if (selectedOccasion !== 'all' && !updated.find((o) => o.name === selectedOccasion)) {
+      setSelectedOccasion('all');
+    }
+    showToast('🗑️ تم حذف المناسبة');
+  };
+
+  const handleImportJson = (imported: LedgerEntry[]) => {
+    persistState(imported);
+    showToast(`✔ تم استيراد واسترجاع ${imported.length} قيد بنجاح!`);
   };
 
   // Update Handler
@@ -262,8 +320,16 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
 
   // Smart Arabic Search Filter (normalizes hamzas, yaa/alif maqsura, taa marbuta, and matches all words)
   const filteredEntries = entries.filter((item) => {
+    // Filter by selected occasion (collection)
+    if (selectedOccasion !== 'all') {
+      const itemOcc = item.occasion || 'عام';
+      if (itemOcc !== selectedOccasion && (selectedOccasion !== 'عام' || item.occasion)) {
+        return false;
+      }
+    }
+
     if (searchQuery.trim()) {
-      const targetText = `${item.name} ${item.nickname || ''} ${item.location} ${item.notes}`;
+      const targetText = `${item.name} ${item.nickname || ''} ${item.location} ${item.notes} ${item.occasion || ''}`;
       if (!matchesArabicSearch(targetText, searchQuery)) return false;
     }
 
@@ -283,17 +349,28 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
 
   return (
     <div className="min-h-screen flex flex-col bg-[#090d16] text-[#f8fafc] pb-64">
-      {/* Top Header */}
+      {/* Top Header with 3 Bars */}
       <Header
         totalCount={stats.totalCount}
-        onOpenManualModal={() => setIsManualModalOpen(true)}
-        onExportJson={handleExportJson}
+        onOpenDrawer={() => setIsDrawerOpen(true)}
+        currentOccasionName={selectedOccasion}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 pt-4 sm:pt-6">
         {/* Quick Stats Grid */}
         <StatsCards stats={stats} />
+
+        {/* Occasions / Collections Quick Bar */}
+        <div className="mb-3">
+          <OccasionChipsBar
+            occasions={occasions}
+            selectedOccasion={selectedOccasion}
+            onSelectOccasion={(occ) => setSelectedOccasion(occ)}
+            onOpenDrawer={() => setIsDrawerOpen(true)}
+            entries={entries}
+          />
+        </div>
 
         {/* Search & Filter Bar */}
         <div className="mb-4 flex flex-col gap-2.5">
@@ -457,7 +534,24 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       <ManualAddModal
         isOpen={isManualModalOpen}
         onClose={() => setIsManualModalOpen(false)}
+        occasions={occasions}
+        defaultOccasion={selectedOccasion === 'all' ? undefined : selectedOccasion}
         onSubmit={handleAddNewEntry}
+      />
+
+      {/* Sidebar Navigation Drawer (3 Bars ☰) */}
+      <SidebarDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        occasions={occasions}
+        selectedOccasion={selectedOccasion}
+        onSelectOccasion={(occ) => setSelectedOccasion(occ)}
+        onAddOccasion={handleAddOccasion}
+        onDeleteOccasion={handleDeleteOccasion}
+        entries={entries}
+        onOpenManualModal={() => setIsManualModalOpen(true)}
+        onExportJson={handleExportJson}
+        onImportJson={handleImportJson}
       />
 
       {/* Statement / Ledger Profile Modal */}
