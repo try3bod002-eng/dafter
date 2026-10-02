@@ -51,21 +51,27 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
   const [isVoiceSearching, setIsVoiceSearching] = useState(false);
   const searchRecRef = useRef<any>(null);
 
-  // Persistent Client Database: Ensures deletes, edits, and additions stay 100% saved across refreshes
+  // Central Database Sync: Live synchronization with SQLite database (unified across all devices)
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_DB_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setEntries(parsed);
-          calculateAndSetStats(parsed);
-        }
-      } else {
-        localStorage.setItem(LOCAL_STORAGE_DB_KEY, JSON.stringify(initialEntries));
-      }
+    calculateAndSetStats(initialEntries);
 
-      // Load saved occasions
+    const refreshFromDb = () => {
+      fetch('/api/entries')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && Array.isArray(data.entries)) {
+            setEntries(data.entries);
+            calculateAndSetStats(data.entries);
+          }
+        })
+        .catch(() => {});
+    };
+
+    refreshFromDb();
+    window.addEventListener('focus', refreshFromDb);
+
+    // Load saved occasions
+    try {
       const savedOccs = localStorage.getItem(LOCAL_STORAGE_OCCASIONS_KEY);
       if (savedOccs) {
         const parsedOccs = JSON.parse(savedOccs);
@@ -76,9 +82,10 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
         localStorage.setItem(LOCAL_STORAGE_OCCASIONS_KEY, JSON.stringify(DEFAULT_OCCASIONS));
       }
     } catch (e) {
-      console.error('Error reading local persistent DB:', e);
+      console.error('Error loading occasions:', e);
     }
-    calculateAndSetStats(initialEntries);
+
+    return () => window.removeEventListener('focus', refreshFromDb);
   }, [initialEntries]);
 
   const showToast = (msg: string) => {
@@ -138,17 +145,12 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     });
   };
 
-  const persistState = (newEntries: LedgerEntry[]) => {
+  const updateLocalList = (newEntries: LedgerEntry[]) => {
     setEntries(newEntries);
     calculateAndSetStats(newEntries);
-    try {
-      localStorage.setItem(LOCAL_STORAGE_DB_KEY, JSON.stringify(newEntries));
-    } catch (e) {
-      console.error('Error persisting database:', e);
-    }
   };
 
-  // Add Handler
+  // Add Handler - Saves to SQLite database directly
   const handleAddNewEntry = async (newEntryData: {
     name: string;
     nickname?: string;
@@ -158,6 +160,27 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     notes: string;
     crossed?: boolean;
   }) => {
+    try {
+      const res = await fetch('/api/entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newEntryData,
+          occasion: newEntryData.occasion || (selectedOccasion !== 'all' ? selectedOccasion : undefined),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.entry) {
+        const updated = [data.entry, ...entries.filter((e) => e.id !== data.entry.id)];
+        updateLocalList(updated);
+        showToast(`✔ تم الحفظ في قاعدة البيانات: "${data.entry.name}" (${data.entry.amount} ج)`);
+        return;
+      }
+    } catch (e) {
+      console.error('Error saving to SQLite:', e);
+    }
+
+    // Fallback optimistic
     const maxId = entries.reduce((max, e) => (e.id > max ? e.id : max), 0);
     const newEntry: LedgerEntry = {
       id: maxId + 1,
@@ -173,19 +196,9 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-
     const updated = [newEntry, ...entries];
-    persistState(updated);
+    updateLocalList(updated);
     showToast(`✔ تم الحفظ: "${newEntry.name}" (${newEntry.amount} ج)`);
-
-    // Sync to API in background
-    try {
-      fetch('/api/entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEntryData),
-      }).catch(() => {});
-    } catch {}
   };
 
   const handleAddOccasion = (name: string) => {
@@ -215,12 +228,22 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     showToast('🗑️ تم حذف المناسبة');
   };
 
-  const handleImportJson = (imported: LedgerEntry[]) => {
-    persistState(imported);
+  const handleImportJson = async (imported: LedgerEntry[]) => {
+    updateLocalList(imported);
     showToast(`✔ تم استيراد واسترجاع ${imported.length} قيد بنجاح!`);
+    // Sync each to server
+    for (const item of imported) {
+      try {
+        await fetch('/api/entries', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item),
+        });
+      } catch {}
+    }
   };
 
-  // Update Handler
+  // Update Handler - Syncs to SQLite directly
   const handleUpdateEntry = async (id: number, updatedFields: Partial<LedgerEntry>) => {
     const updatedList = entries.map((item) => {
       if (item.id === id) {
@@ -229,7 +252,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
       return item;
     });
 
-    persistState(updatedList);
+    updateLocalList(updatedList);
 
     // Keep selected statement modal in sync
     if (selectedStatementEntry && selectedStatementEntry.id === id) {
@@ -237,31 +260,35 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
     }
 
     try {
-      fetch(`/api/entries/${id}`, {
+      await fetch(`/api/entries/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedFields),
-      }).catch(() => {});
-    } catch {}
+      });
+    } catch (e) {
+      console.error('Error updating in SQLite:', e);
+    }
   };
 
   // Save updated entry from Statement Modal
   const handleSaveStatementEntry = (updatedEntry: LedgerEntry) => {
     handleUpdateEntry(updatedEntry.id, updatedEntry);
     setSelectedStatementEntry(updatedEntry);
-    showToast(`✔ تم تحديث كشف حساب: ${updatedEntry.name}`);
+    showToast(`✔ تم حفظ كشف حساب: ${updatedEntry.name} في قاعدة البيانات`);
   };
 
-  // Delete Handler - Permanently deletes and stays deleted on refresh
+  // Delete Handler - Permanently deletes from SQLite
   const handleDeleteEntry = async (id: number) => {
-    if (!confirm('هل أنت متأكد من حذف هذا الاسم نهائياً؟')) return;
+    if (!confirm('هل أنت متأكد من حذف هذا الاسم نهائياً من قاعدة البيانات؟')) return;
     const updatedList = entries.filter((item) => item.id !== id);
-    persistState(updatedList);
-    showToast('تم الحذف نهائياً');
+    updateLocalList(updatedList);
+    showToast('تم الحذف من قاعدة البيانات');
 
     try {
-      fetch(`/api/entries/${id}`, { method: 'DELETE' }).catch(() => {});
-    } catch {}
+      await fetch(`/api/entries/${id}`, { method: 'DELETE' });
+    } catch (e) {
+      console.error('Error deleting from SQLite:', e);
+    }
   };
 
   // Voice Search inside Search Box (with smart deduplication)

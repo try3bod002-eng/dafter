@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { updateEntry, deleteEntry } from '@/lib/db';
+import { prisma } from '@/lib/prisma';
+
+export const dynamic = 'force-dynamic';
 
 export async function PUT(
   request: Request,
@@ -13,13 +15,71 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const updated = updateEntry(entryId, body);
+    const { name, nickname, occasion, amount, receivedAmount, paidAmount, location, notes, crossed, transactions } = body;
 
-    if (!updated) {
-      return NextResponse.json({ success: false, error: 'Entry not found' }, { status: 404 });
+    // If transactions array was passed, synchronize them
+    if (Array.isArray(transactions)) {
+      // Delete existing and re-insert
+      await prisma.transaction.deleteMany({
+        where: { entryId },
+      });
+
+      for (const t of transactions) {
+        await prisma.transaction.create({
+          data: {
+            entryId,
+            type: t.type,
+            amount: Number(t.amount) || 0,
+            title: t.title || 'حركة',
+            occasion: t.occasion || null,
+            notes: t.notes || null,
+            date: t.date ? new Date(t.date) : new Date(),
+          },
+        });
+      }
     }
 
-    return NextResponse.json({ success: true, entry: updated });
+    const updated = await prisma.entry.update({
+      where: { id: entryId },
+      data: {
+        ...(name !== undefined && { name: name.trim() }),
+        ...(nickname !== undefined && { nickname: nickname?.trim() || null }),
+        ...(occasion !== undefined && { occasion: occasion?.trim() || null }),
+        ...(amount !== undefined && { amount: Number(amount) || 0 }),
+        ...(receivedAmount !== undefined && { receivedAmount: Number(receivedAmount) || 0 }),
+        ...(paidAmount !== undefined && { paidAmount: Number(paidAmount) || 0 }),
+        ...(location !== undefined && { location: (location || '').trim() }),
+        ...(notes !== undefined && { notes: (notes || '').trim() }),
+        ...(crossed !== undefined && { crossed: !!crossed }),
+      },
+      include: { transactions: true },
+    });
+
+    const formatted = {
+      id: updated.id,
+      name: updated.name,
+      nickname: updated.nickname || undefined,
+      occasion: updated.occasion || undefined,
+      amount: updated.amount,
+      receivedAmount: updated.receivedAmount,
+      paidAmount: updated.paidAmount,
+      location: updated.location,
+      notes: updated.notes,
+      crossed: updated.crossed,
+      transactions: updated.transactions.map((t) => ({
+        id: t.id,
+        date: t.date.toISOString(),
+        type: t.type as 'received' | 'paid',
+        amount: t.amount,
+        title: t.title,
+        occasion: t.occasion || undefined,
+        notes: t.notes || undefined,
+      })),
+      createdAt: updated.createdAt.toISOString(),
+      updatedAt: updated.updatedAt.toISOString(),
+    };
+
+    return NextResponse.json({ success: true, entry: formatted });
   } catch (error) {
     console.error('API Error in PUT /api/entries/[id]:', error);
     return NextResponse.json({ success: false, error: 'Failed to update entry' }, { status: 500 });
@@ -44,10 +104,9 @@ export async function DELETE(
       return NextResponse.json({ success: false, error: 'Invalid ID' }, { status: 400 });
     }
 
-    const deleted = deleteEntry(entryId);
-    if (!deleted) {
-      return NextResponse.json({ success: false, error: 'Entry not found' }, { status: 404 });
-    }
+    await prisma.entry.delete({
+      where: { id: entryId },
+    });
 
     return NextResponse.json({ success: true, message: 'Deleted successfully' });
   } catch (error) {

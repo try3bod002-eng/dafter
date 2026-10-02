@@ -1,9 +1,12 @@
 import { getAllEntries, getStats } from '@/lib/db';
 import LedgerClient from '@/components/LedgerClient';
 
-export default function Home() {
-  const initialEntries = getAllEntries();
-  const initialStats = getStats();
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export default async function Home() {
+  const initialEntries = await getAllEntries();
+  const initialStats = await getStats();
 
   return (
     <LedgerClient

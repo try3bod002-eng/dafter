@@ -1,130 +1,99 @@
+import { prisma } from '@/lib/prisma';
+import { LedgerEntry, LedgerStats, calculateNetBalance } from '@/types/ledger';
 import fs from 'fs';
 import path from 'path';
-import { LedgerEntry, LedgerStats } from '@/types/ledger';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'daftr.json');
 
-const INITIAL_PAGE_1_ENTRIES: Omit<LedgerEntry, 'createdAt' | 'updatedAt'>[] = [];
-
-function ensureDbFile(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(DB_FILE)) {
-    const now = new Date().toISOString();
-    const seededData: LedgerEntry[] = INITIAL_PAGE_1_ENTRIES.map(item => ({
-      ...item,
-      createdAt: now,
-      updatedAt: now,
-    }));
-    fs.writeFileSync(DB_FILE, JSON.stringify(seededData, null, 2), 'utf-8');
-  }
-}
-
-export function getAllEntries(): LedgerEntry[] {
-  ensureDbFile();
+export async function getAllEntries(): Promise<LedgerEntry[]> {
   try {
-    const raw = fs.readFileSync(DB_FILE, 'utf-8');
-    return JSON.parse(raw) as LedgerEntry[];
+    const entries = await prisma.entry.findMany({
+      include: { transactions: true },
+      orderBy: { id: 'desc' },
+    });
+
+    return entries.map((e) => ({
+      id: e.id,
+      name: e.name,
+      nickname: e.nickname || undefined,
+      occasion: e.occasion || undefined,
+      amount: e.amount,
+      receivedAmount: e.receivedAmount,
+      paidAmount: e.paidAmount,
+      location: e.location,
+      notes: e.notes,
+      crossed: e.crossed,
+      transactions: e.transactions.map((t) => ({
+        id: t.id,
+        date: t.date.toISOString(),
+        type: t.type as 'received' | 'paid',
+        amount: t.amount,
+        title: t.title,
+        occasion: t.occasion || undefined,
+        notes: t.notes || undefined,
+      })),
+      createdAt: e.createdAt.toISOString(),
+      updatedAt: e.updatedAt.toISOString(),
+    }));
   } catch (err) {
-    console.error("Error reading database file:", err);
+    console.error('Error fetching from SQLite, falling back to daftr.json:', err);
+    if (fs.existsSync(DB_FILE)) {
+      try {
+        return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+      } catch {}
+    }
     return [];
   }
 }
 
-export function saveAllEntries(entries: LedgerEntry[]): boolean {
-  ensureDbFile();
-  try {
-    const tmpFile = `${DB_FILE}.tmp`;
-    fs.writeFileSync(tmpFile, JSON.stringify(entries, null, 2), 'utf-8');
-    fs.renameSync(tmpFile, DB_FILE);
-    return true;
-  } catch (err) {
-    console.error("Error writing to database:", err);
-    return false;
-  }
-}
-
-export function addEntry(data: { name: string; amount: number; location?: string; notes?: string; crossed?: boolean }): LedgerEntry {
-  const entries = getAllEntries();
-  const maxId = entries.reduce((max, e) => (e.id > max ? e.id : max), 0);
-  const now = new Date().toISOString();
-
-  const newEntry: LedgerEntry = {
-    id: maxId + 1,
-    name: data.name.trim(),
-    amount: Number(data.amount) || 0,
-    location: (data.location || '').trim(),
-    notes: (data.notes || '').trim(),
-    crossed: !!data.crossed,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  entries.unshift(newEntry);
-  saveAllEntries(entries);
-  return newEntry;
-}
-
-export function updateEntry(id: number, data: Partial<Omit<LedgerEntry, 'id' | 'createdAt'>>): LedgerEntry | null {
-  const entries = getAllEntries();
-  const index = entries.findIndex(e => e.id === id);
-  if (index === -1) return null;
-
-  const existing = entries[index];
-  const updated: LedgerEntry = {
-    ...existing,
-    ...data,
-    updatedAt: new Date().toISOString(),
-  };
-
-  entries[index] = updated;
-  saveAllEntries(entries);
-  return updated;
-}
-
-export function deleteEntry(id: number): boolean {
-  const entries = getAllEntries();
-  const filtered = entries.filter(e => e.id !== id);
-  if (filtered.length === entries.length) return false;
-
-  saveAllEntries(filtered);
-  return true;
-}
-
-export function getStats(): LedgerStats {
-  const entries = getAllEntries();
+export async function getStats(): Promise<LedgerStats> {
+  const entries = await getAllEntries();
   const totalCount = entries.length;
-  const totalAmount = entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  const crossedCount = entries.filter(e => e.crossed).length;
-  const activeCount = totalCount - crossedCount;
-  const totalCrossedAmount = entries
-    .filter(e => e.crossed)
-    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  const totalAmount = entries.reduce(
+    (sum, e) => sum + (Number(e.receivedAmount ?? e.amount) || 0),
+    0
+  );
 
+  let crossedCount = 0;
+  let totalCrossedAmount = 0;
+  let totalPaidAmount = 0;
   let totalAlinaAmount = 0;
+  let totalLeinaAmount = 0;
   let settlementsCount = 0;
 
-  entries.forEach(e => {
-    const text = `${e.location} ${e.notes}`;
-    const hasSettlement = text.includes('كان عليه') || text.includes('علينا') || text.includes('عليه');
-    if (hasSettlement) settlementsCount++;
+  entries.forEach((e) => {
+    let paid = Number(e.paidAmount) || 0;
+    if (e.transactions && e.transactions.length > 0) {
+      paid = e.transactions
+        .filter((t) => t.type === 'paid')
+        .reduce((sum, t) => sum + t.amount, 0);
+    }
+    totalPaidAmount += paid;
 
-    const alinaMatch = text.match(/علينا\s*(\d+)/);
-    if (alinaMatch) {
-      totalAlinaAmount += parseInt(alinaMatch[1], 10);
+    const net = calculateNetBalance(e);
+    if (net.status === 'khalis' || e.crossed) {
+      crossedCount++;
+      totalCrossedAmount += (Number(e.paidAmount ?? e.amount) || 0);
+    } else if (net.status === 'alina') {
+      settlementsCount++;
+      totalAlinaAmount += net.netAmount;
+    } else if (net.status === 'leina') {
+      totalLeinaAmount += net.netAmount;
     }
   });
+
+  const activeCount = totalCount - crossedCount;
 
   return {
     totalCount,
     totalAmount,
+    totalPaidAmount,
     crossedCount,
     activeCount,
     settlementsCount,
     totalCrossedAmount,
     totalAlinaAmount,
+    totalLeinaAmount,
   };
 }
