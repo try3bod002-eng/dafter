@@ -43,12 +43,24 @@ export default function Header({
         <button
           type="button"
           onClick={onOpenDrawer}
-          className="w-11 h-11 rounded-2xl bg-[#111827] hover:bg-[#1e293b] border border-[#1f293d] hover:border-sky-400 text-slate-300 hover:text-white flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md active:scale-90"
+          className="w-10 h-10 rounded-xl bg-[#111827] hover:bg-[#1e293b] border border-[#1f293d] hover:border-sky-400 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-md active:scale-95"
           title="القائمة والمناسبات (3 شُرط)"
         >
-          <span className="w-5 h-0.5 bg-current rounded-full transition-transform"></span>
-          <span className="w-5 h-0.5 bg-current rounded-full transition-transform"></span>
-          <span className="w-3.5 h-0.5 bg-current rounded-full transition-transform ml-auto"></span>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="transition-transform group-hover:scale-105"
+          >
+            <line x1="4" y1="6" x2="20" y2="6" />
+            <line x1="4" y1="12" x2="20" y2="12" />
+            <line x1="4" y1="18" x2="20" y2="18" />
+          </svg>
         </button>
       </div>
     </header>

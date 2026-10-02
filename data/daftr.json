@@ -1,112 +1,12 @@
 [
   {
-    "id": 3,
-    "name": "احمد الجوهري",
-    "amount": 500,
-    "location": "نجير",
-    "notes": "📝\nبس",
-    "crossed": false,
-    "createdAt": "2026-10-01T15:26:58.885Z",
-    "updatedAt": "2026-10-01T15:35:54.237Z",
-    "receivedAmount": 10500,
-    "paidAmount": 20500,
-    "transactions": [
-      {
-        "id": "tx_1790868954204",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "paid",
-        "amount": 10500,
-        "title": "رد واجب في مناسبته"
-      },
-      {
-        "id": "tx_1790868922855",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "received",
-        "amount": 10000,
-        "title": "نقطة إضافية مستلمة"
-      },
-      {
-        "id": "tx_1790868898447",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "paid",
-        "amount": 10000,
-        "title": "رد واجب في مناسبته"
-      },
-      {
-        "id": "tx_initial_3",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "received",
-        "amount": 500,
-        "title": "نقطة مستلمة في فرحنا",
-        "notes": "بس"
-      }
-    ]
-  },
-  {
-    "id": 2,
-    "name": "احمد",
-    "amount": 200,
-    "location": "نجير",
-    "notes": "📝\nبدون ملاحظات",
-    "crossed": true,
-    "createdAt": "2026-10-01T15:20:42.294Z",
-    "updatedAt": "2026-10-01T15:53:20.542Z",
-    "nickname": "الجوهري",
-    "receivedAmount": 500,
-    "paidAmount": 500,
-    "transactions": [
-      {
-        "id": "tx_1790868522824",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "received",
-        "amount": 300,
-        "title": "نقطة إضافية مستلمة"
-      },
-      {
-        "id": "tx_1790868092833",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "paid",
-        "amount": 500,
-        "title": "رد واجب في مناسبتة",
-        "notes": "حنه بنتو مريم"
-      },
-      {
-        "id": "tx_initial_2",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "received",
-        "amount": 200,
-        "title": "نقطة مستلمة في فرحنا"
-      }
-    ]
-  },
-  {
     "id": 1,
-    "name": "عبد الرحمن الجوهري",
-    "amount": 5000,
-    "location": "📍\nنجير",
-    "notes": "📝\nكان عليه 100 وبقى عليه 500",
-    "crossed": true,
-    "createdAt": "2026-10-01T14:45:54.285Z",
-    "updatedAt": "2026-10-01T15:27:45.243Z",
-    "nickname": "+ لقب",
-    "paidAmount": 5000,
-    "receivedAmount": 5000,
-    "transactions": [
-      {
-        "id": "tx_1790868324094",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "paid",
-        "amount": 5000,
-        "title": "رد واجب في مناسبته"
-      },
-      {
-        "id": "tx_initial_1",
-        "date": "١‏/١٠‏/٢٠٢٦",
-        "type": "received",
-        "amount": 5000,
-        "title": "نقطة مستلمة في فرحنا",
-        "notes": "📝\nكان عليه 100 وبقى عليه 500"
-      }
-    ]
+    "name": "احمد الجوهري",
+    "amount": 200,
+    "location": "",
+    "notes": "خالص او ما فيش",
+    "crossed": false,
+    "createdAt": "2026-10-01T17:16:07.747Z",
+    "updatedAt": "2026-10-01T17:17:24.605Z"
   }
 ]

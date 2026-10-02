@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Entry {
+  id             Int           @id @default(autoincrement())
+  name           String
+  nickname       String?
+  occasion       String?
+  amount         Float         @default(0)
+  receivedAmount Float         @default(0)
+  paidAmount     Float         @default(0)
+  location       String        @default("")
+  notes          String        @default("")
+  crossed        Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  transactions   Transaction[]
+}
+
+model Transaction {
+  id        String   @id @default(cuid())
+  entryId   Int
+  date      DateTime @default(now())
+  type      String
+  amount    Float
+  title     String
+  occasion  String?
+  notes     String?
+  entry     Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+}
+
+model Occasion {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  date      String?
+  notes     String?
+  createdAt DateTime @default(now())
+}
