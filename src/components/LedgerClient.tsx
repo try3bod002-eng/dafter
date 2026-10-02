@@ -8,7 +8,7 @@ import VoiceInputBar from '@/components/VoiceInputBar';
 import ManualAddModal from '@/components/ManualAddModal';
 import StatementModal from '@/components/StatementModal';
 import { LedgerEntry, LedgerStats, OccasionItem, calculateNetBalance } from '@/types/ledger';
-import { matchesArabicSearch, extractCleanTranscript } from '@/lib/speechParser';
+import { matchesArabicSearch, extractCleanTranscript, cleanSearchQuery } from '@/lib/speechParser';
 import SidebarDrawer from '@/components/SidebarDrawer';
 import OccasionChipsBar from '@/components/OccasionChipsBar';
 
@@ -290,9 +290,7 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
 
       rec.onresult = (e: any) => {
         const fullSentence = extractCleanTranscript(e.results);
-        const cleaned = fullSentence
-          .replace(/^(ابحث عن|دور على|هاتلي|هات|اسم)\s+/g, '')
-          .trim();
+        const cleaned = cleanSearchQuery(fullSentence);
 
         if (cleaned) {
           setSearchQuery(cleaned);
@@ -330,8 +328,9 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
 
   // Smart Arabic Search Filter (normalizes hamzas, yaa/alif maqsura, taa marbuta, and matches all words)
   const filteredEntries = entries.filter((item) => {
-    // Filter by selected occasion (collection)
-    if (selectedOccasion !== 'all') {
+    // When NOT searching, filter by active occasion/collection.
+    // When the user IS searching, search across the entire notebook so no one is missed!
+    if (!searchQuery.trim() && selectedOccasion !== 'all') {
       const itemOcc = item.occasion || 'عام';
       if (itemOcc !== selectedOccasion && (selectedOccasion !== 'عام' || item.occasion)) {
         return false;

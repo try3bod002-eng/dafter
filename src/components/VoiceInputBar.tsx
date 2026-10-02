@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { parseSpokenSentence, extractCleanTranscript } from '@/lib/speechParser';
+import { parseSpokenSentence, extractCleanTranscript, cleanSearchQuery } from '@/lib/speechParser';
 
 interface VoiceInputBarProps {
   onNewEntry: (entry: { name: string; amount: number; location: string; notes: string; crossed: boolean }) => void;
@@ -142,7 +142,7 @@ export default function VoiceInputBar({
       if (mode === 'record') {
         onNewEntry(parseSpokenSentence(raw));
       } else if (mode === 'search' && onVoiceSearch) {
-        const q = raw.replace(/^(ابحث عن|دور على|هاتلي|هات|اسم)\s+/g, '').trim();
+        const q = cleanSearchQuery(raw);
         onVoiceSearch(q);
       }
     }

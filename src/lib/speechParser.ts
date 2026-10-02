@@ -127,6 +127,62 @@ export function parseSpokenSentence(rawText: string): ParsedSpokenEntry {
   };
 }
 
+// Conversational Egyptian Arabic prefixes to clean from voice queries
+const VOICE_SEARCH_FILLERS = [
+  'ابحث عن',
+  'دور على',
+  'شوفلي',
+  'شوف لي',
+  'شوف',
+  'هاتلي',
+  'هات لي',
+  'هات',
+  'عايز اعرف',
+  'عايز',
+  'عاوز',
+  'فين',
+  'طلعلي',
+  'طلع لي',
+  'طلع',
+  'كشف حساب',
+  'كشف الحساب',
+  'كشف',
+  'حساب',
+  'شخص اسمه',
+  'واحد اسمه',
+  'اسم',
+  'عم',
+  'الحاج',
+  'المعلم',
+];
+
+export function cleanSearchQuery(query: string): string {
+  if (!query) return '';
+  let q = query.trim();
+
+  // Strip punctuation like dots, commas, question marks from speech recognition
+  q = q.replace(/[\.\,\،\؟\?\!\:\-\_\"\'\«\»\(\)]/g, ' ');
+
+  // Strip conversational Egyptian fillers from the start
+  for (const filler of VOICE_SEARCH_FILLERS) {
+    const reg = new RegExp(`^${filler}\\s+`, 'i');
+    if (reg.test(q)) {
+      q = q.replace(reg, '');
+    }
+  }
+
+  return q.replace(/\s+/g, ' ').trim();
+}
+
+export function stripAlPrefix(word: string): string {
+  if (!word) return '';
+  // If word starts with 'ال' and has at least 3 letters afterwards (e.g. 'الجوهري' -> 'جوهري')
+  if (word.startsWith('ال') && word.length >= 4) {
+    return word.slice(2);
+  }
+  return word;
+}
+
 export function normalizeArabic(text: string): string {
   if (!text) return '';
   return text
@@ -135,7 +191,9 @@ export function normalizeArabic(text: string): string {
     .replace(/ى/g, 'ي') // Normalize alif maqsura to yaa
     .replace(/ة/g, 'ه') // Normalize taa marbuta to haa
     .replace(/ـ/g, '') // Remove kashida / tatweel
+    .replace(/[\.\,\،\؟\?\!\:\-\_\"\'\«\»\(\)]/g, ' ') // Strip punctuation to spaces
     .toLowerCase()
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -143,16 +201,42 @@ export function matchesArabicSearch(target: string, query: string): boolean {
   if (!query) return true;
   if (!target) return false;
 
-  const normTarget = normalizeArabic(target);
-  const normQuery = normalizeArabic(query);
+  const cleanedQuery = cleanSearchQuery(query);
+  if (!cleanedQuery) return true;
 
+  const normTarget = normalizeArabic(target);
+  const normQuery = normalizeArabic(cleanedQuery);
+
+  // 1. Direct substring match
   if (normTarget.includes(normQuery)) return true;
 
-  // Multi-word / token search: all search words must match anywhere in the target
-  const tokens = normQuery.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return true;
+  // 2. Tokenize query words
+  const queryTokens = normQuery.split(/\s+/).filter(Boolean);
+  if (queryTokens.length === 0) return true;
 
-  return tokens.every((token) => normTarget.includes(token));
+  // 3. Tokenize target words
+  const targetTokens = normTarget.split(/\s+/).filter(Boolean);
+
+  // Every token in query must match at least one word in target
+  return queryTokens.every((qToken) => {
+    // Direct substring in target string
+    if (normTarget.includes(qToken)) return true;
+
+    const qTokenNoAl = stripAlPrefix(qToken);
+
+    // Check against individual words with 'الـ' stripping
+    return targetTokens.some((tToken) => {
+      if (tToken.includes(qToken)) return true;
+      if (qToken.includes(tToken)) return true;
+
+      const tTokenNoAl = stripAlPrefix(tToken);
+      if (tTokenNoAl === qTokenNoAl) return true;
+      if (tTokenNoAl.includes(qTokenNoAl)) return true;
+      if (qTokenNoAl.includes(tTokenNoAl)) return true;
+
+      return false;
+    });
+  });
 }
 
 export function extractCleanTranscript(results: any): string {
