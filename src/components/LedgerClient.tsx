@@ -596,6 +596,8 @@ export default function LedgerClient({ initialEntries, initialStats }: LedgerCli
         isOpen={isStatementOpen}
         onClose={() => setIsStatementOpen(false)}
         onSaveEntry={handleSaveStatementEntry}
+        occasions={occasions}
+        currentOccasion={selectedOccasion !== 'all' ? selectedOccasion : undefined}
       />
 
       {/* Toast Notification */}
